@@ -85,10 +85,10 @@ const Level = (() => {
   });
   const N = FLOORS.length, goal = s.find(r => r.kind === 'goal');
   return { W, H, FH, BASE, N, solids: s, goal, spawn: { x: 160, y: BASE - CFG.player.h },
-           floorOf: y => Level.segs ? segIdx(y) + 1 : Math.min(Level.N, Math.max(1, Math.floor((Level.BASE - y) / Level.FH) + 1)) };
+           floorOf: y => Math.min(Level.N, Math.max(1, Math.floor((Level.BASE - y) / Level.FH) + 1)) };
 })();
 const ManualData = { FH: Level.FH, solids: Level.solids, goal: Level.goal, N: Level.N, BASE: Level.BASE, H: Level.H, spawn: Level.spawn };
-Level.set = function (d) { Object.assign(this, { FH: d.FH, solids: d.solids, goal: d.goal, N: d.N, BASE: d.BASE, H: d.H, spawn: d.spawn, hazards: d.hazards || [], structs: d.structs || [], xMin: d.xMin || 0, segs: d.segs || null }); };
+Level.set = function (d) { Object.assign(this, { FH: d.FH, solids: d.solids, goal: d.goal, N: d.N, BASE: d.BASE, H: d.H, spawn: d.spawn, hazards: d.hazards || [], structs: d.structs || [], xMin: d.xMin || 0 }); };
 
 /* ===== entities/Player.js + systems/PlayerSystem.js ===== */
 const approach = (v, t, d) => v < t ? Math.min(v + d, t) : Math.max(v - d, t);
@@ -211,62 +211,6 @@ function themed(c, rng, st, haz, pi) {
     else h = { type: 'piston', x: Math.round(cx - 20), y: r.y - 80, w: 40, h: 80, safe: 1.2, warn: .5, on: .8, ret: .4, ph: f0 * 2.9 };
     haz.push(h);
   }
-}
-
-/* ===== estruturas DESENHADAS no editor (editor-estruturas.html): cada caractere = 50 px; altura própria ===== */
-const DRAWN = [
-  { id: 'lar', name: 'Lar dos Tubarões', size: 'Grande', diff: 'Difícil', minPhase: 0, rows: [
-    ".|||||||X.....|...",
-    "|.......||.....||.",
-    "|..T......||....|.",
-    "|......#......N#|.",
-    ".|......#...#...||",
-    "..|..####.....##||",
-    ".|.|......T.....|.",
-    ".|..||.....##...|.",
-    "|.T..|...........|",
-    "|.....#.....##...|",
-    "|..............T.|",
-    "|..#..N..#.......|",
-    ".|............#.|.",
-    "..|..#..#......|..",
-    ".|..........#...|.",
-    "|...T..##..N.....|",
-    "|..#.......##....|",
-    "|.......T........|",
-    "|.T.##...........|",
-    "|.............N..|",
-    ".|...N.....##...|.",
-    "..||..##......||..",
-    "....|........|....",
-    ".....||..E.||.....",
-    ".......||||......."] }
-];
-Object.assign(STY, { lar: { plat: '#2fae6b', bg: 'rgba(30,111,168,.28)' } });
-function segIdx(y) { const s = Level.segs; for (let i = 0; i < s.length; i++) if (y >= s[i].y0 && y < s[i].y1) return i; return y < s[s.length - 1].y0 ? s.length - 1 : 0; }
-const where = y => Level.segs ? 'Estrutura ' + Level.floorOf(y) + '/' + Level.segs.length : 'Andar ' + Level.floorOf(y) + '/' + Level.N;
-function buildDrawn(d, BASE) { // converte a grade em sólidos + obstáculos; a estrutura fica na base da torre (entrada pelo térreo)
-  const R = d.rows.map(r => r.split('')), n = R.length, top = BASE - n * 50, solids = [], hazards = [], S = ch => ch === '#' || ch === '|';
-  let er = -1, ec = -1, xr = -1, xc = -1;
-  R.forEach((row, r) => row.forEach((k, c) => { if (k === 'E') { er = r; ec = c; } if (k === 'X') { xr = r; xc = c; } }));
-  const probe = dir => { let c = ec + dir; while (c >= 0 && c < 18 && R[er][c] === '.') c += dir; const s = c; while (c >= 0 && c < 18 && S(R[er][c])) c += dir; return { s, k: Math.abs(c - s), out: c >= 0 && c < 18 }; };
-  const a = probe(-1), b = probe(1), pk = a.out && (!b.out || a.k <= b.k) ? [a, -1] : b.out ? [b, 1] : null; // porta: abre a parede mais curta ao lado da entrada
-  if (pk) for (let i = 0; i < pk[0].k; i++) R[er][pk[0].s + pk[1] * i] = '.';
-  let exit = null;
-  R.forEach((row, r) => { let c = 0; while (c < 18) { const ch = row[c]; if (!S(ch)) { c++; continue; } let e = c; while (e < 18 && row[e] === ch) e++;
-    const q = { x: c * 50, y: top + r * 50, w: (e - c) * 50, h: 50, kind: ch === '|' ? 'wall' : 'plat', sk: d.id }; solids.push(q); if (r === xr + 1 && xc >= c && xc < e) { q.kind = 'plat'; exit = q; } c = e; } });
-  if (!exit) { exit = { x: xc * 50, y: top + (xr + 1) * 50, w: 50, h: 50, kind: 'plat', sk: d.id }; solids.push(exit); }
-  R.forEach((row, r) => row.forEach((k, c) => {
-    const cx = c * 50 + 25, cy = top + r * 50 + 25, ph = ((r * 13 + c * 7) % 63) / 10, y0 = top + (r + 1) * 50;
-    if (k === '^') hazards.push({ type: 'spike', x: c * 50 + 3, y: y0 - 14, w: 44, h: 14 });
-    else if (k === 'Z' || k === 'S') { const fr = cc => cc >= 0 && cc < 18 && !S(row[cc]) && S((R[r + 1] || [])[cc] || '.'); let cl = c, cr = c; while (cl > 0 && c - cl < 3 && fr(cl - 1)) cl--; while (cr < 17 && cr - c < 3 && fr(cr + 1)) cr++;
-      const x0 = cl * 50 + 4, x1 = Math.max(x0 + 20, (cr + 1) * 50 - 28); hazards.push({ type: k === 'Z' ? 'zombie' : 'saw', x0, x1, x: x0, y: y0 - 28, w: x1 - x0 + 28, h: 28, speed: 50, off: ph / 6.3 }); }
-    else if (k === 'G' || k === 'T') { const g = k === 'G', A = g ? 60 : 80, B = g ? 24 : 16; hazards.push({ type: g ? 'ghost' : 'shark', cx, cy, A, B, om: g ? .9 : .6, ph, hw: g ? 12 : 24, hh: g ? 12 : 11, x: cx - A - 26, y: cy - B - 14, w: 2 * A + 52, h: 2 * B + 28 }); }
-    else if (k === 'N') hazards.push({ type: 'eel', cx, cy, R: 64, safe: 1.6, warn: .7, on: .7, ret: .3, ph: ph / 2, x: cx - 64, y: cy - 64, w: 128, h: 128 });
-    else if (k === 'M') { const L = c < 9, mx = c * 50 + 13, my = y0 - 26; hazards.push({ type: 'monkey', mx, my, T: 3.2, fl: 2.2, ph: ph / 2, bvx: (L ? 1 : -1) * 160, bvy: -420, x: mx - 320, y: my - 140, w: 660, h: 700 }); }
-    else if (k === 'P') hazards.push({ type: 'piston', x: c * 50 + 5, y: y0 - 80, w: 40, h: 80, safe: 1.2, warn: .5, on: .8, ret: .4, ph: ph / 2 });
-  }));
-  return { solids, hazards, exit, top, rows: n, exitRow: xr + 1 };
 }
 /* ===== entities/Hazard.js + systems/ObstacleSystem.js (lote 1: espinhos fixos, retráteis, pisos temporários) ===== */
 CFG.obst = { spike: { w: 36, h: 14 }, rspike: { w: 40, h: 16, safe: 1.4, warn: 0.6, on: 1.0, ret: 0.3 }, temp: { warn: 1.0, gone: 2.5, back: 0.4 } };
@@ -452,16 +396,13 @@ function pickTemplate(pool, rng, ramp, pref = []) {
   return pool[pool.length - 1];
 }
 function* genSteps(seed, phaseIdx) {
-  const t0 = performance.now(), ph = CFG.phases[phaseIdx], N = ph.floors, FH = CFG.gen.floorH, dws = DRAWN.filter(d => d.minPhase <= phaseIdx), dw = dws.length ? dws[SeededRandom(`${GEN_VERSION}|drw|${phaseIdx}|${seed}`).int(dws.length)] : null,
-    Nf = dw ? N - 2 : N, dH = dw ? dw.rows.length * 50 : 0, BASE = Nf * FH + dH + 200, SY0 = dw ? BASE - dH + (dw.rows.findIndex(r => r.includes('X')) + 1) * 50 - 20 : BASE;
+  const t0 = performance.now(), ph = CFG.phases[phaseIdx], N = ph.floors, FH = CFG.gen.floorH, BASE = N * FH + 200;
   const rng = SeededRandom(`${GEN_VERSION}|${phaseIdx}|${seed}`), orng = SeededRandom(`${GEN_VERSION}|obs|${phaseIdx}|${seed}`), blk = [], haz = [], opt = []; // opt = atalhos opcionais (desmoronam), fora da validação obrigatória
   const solids = [{ x: 0, y: BASE, w: Level.W, h: 100, kind: 'floor' }, { x: 0, y: 0, w: 40, h: BASE - 96, kind: 'wall' }, { x: 860, y: 0, w: 40, h: BASE + 100, kind: 'wall' }];
   const stats = { attempts: 0, fails: 0, rejected: 0, fallbacks: 0, ms: 0 }, log = [], floors = [];
-  const D = dw ? buildDrawn(dw, BASE) : null; if (D) { solids.push(...D.solids); haz.push(...D.hazards); }
-  let prev = D ? D.exit : solids[0], lastId = null; const srng = SeededRandom(`${GEN_VERSION}|str|${phaseIdx}|${seed}`), structs = []; let lastS = null, st = null;
-  if (D) structs.push({ id: dw.id, name: dw.name, size: dw.size, diff: dw.diff, mult: lavaMult(dw) });
-  for (let i = 0; i < Nf; i++) {
-    const sy = SY0 - i * FH, ramp = 1 + (ph.maxDiff - 1) * (N > 1 ? (i + (dw ? 2 : 0)) / (N - 1) : 0);
+  let prev = solids[0], lastId = null; const srng = SeededRandom(`${GEN_VERSION}|str|${phaseIdx}|${seed}`), structs = []; let lastS = null, st = null;
+  for (let i = 0; i < N; i++) {
+    const sy = BASE - i * FH, ramp = 1 + (ph.maxDiff - 1) * (N > 1 ? i / (N - 1) : 0);
     if (i % 2 === 0) { let cand = STRUCTS.filter(s => s.minPhase <= phaseIdx && s.id !== lastS); if (!cand.length) cand = STRUCTS.filter(s => s.minPhase <= phaseIdx);
       st = cand[srng.int(cand.length)]; lastS = st.id; structs.push({ id: st.id, name: st.name, size: st.size, diff: st.diff, mult: lavaMult(st) }); }
     let pool = TEMPLATES.filter(t => t.ok && (t.diff <= Math.ceil(ramp - 1e-6) || (phaseIdx >= 1 && st.tpls.includes(t.id) && t.diff <= 3)) && t.id !== lastId);
@@ -485,17 +426,15 @@ function* genSteps(seed, phaseIdx) {
       }
       if (!chosen) { chosen = instantiate(TEMPLATES.find(t => t.id === FALLBACK_ID), sy, false, 0); log.push({ floor: i + 1, tpl: FALLBACK_ID, why: 'FALLBACK FALHOU (torre inválida)' }); }
     }
-    chosen.solids.forEach(s => { if (s.kind === 'plat') s.sk = st.id; }); solids.push(...chosen.solids); const ph2 = { ...ph, idx: phaseIdx, obst: { ...ph.obst, ...st.obst } }; decorate(chosen, orng, ph2, solids, blk, haz, prev, i + (dw ? 2 : 0), N, opt); themed(chosen, orng, st, haz, phaseIdx); floors.push(chosen); lastId = chosen.id; prev = chosen.route[chosen.route.length - 1]; yield i + 1;
+    chosen.solids.forEach(s => { if (s.kind === 'plat') s.sk = st.id; }); solids.push(...chosen.solids); const ph2 = { ...ph, idx: phaseIdx, obst: { ...ph.obst, ...st.obst } }; decorate(chosen, orng, ph2, solids, blk, haz, prev, i, N, opt); themed(chosen, orng, st, haz, phaseIdx); floors.push(chosen); lastId = chosen.id; prev = chosen.route[chosen.route.length - 1]; yield i + 1;
   }
-  const segs = []; if (D) segs.push({ y0: D.top, y1: BASE + 100 });
-  for (let k = 0; k < Nf / 2; k++) { const y1 = SY0 - 2 * k * FH + 20; segs.push({ y0: y1 - 2 * FH, y1: k === 0 && !D ? BASE + 100 : y1 }); }
   const goal = prev; goal.kind = 'goal';
-  const tower = { seed, phase: phaseIdx, N, BASE, FH, H: BASE + 100, solids, goal, floors, hazards: haz, structs, segs, drawn: dw && dw.id, xMin: -300, stats, log, spawn: { x: -220, y: BASE - CFG.player.h },
-                  hash: hashStr(JSON.stringify([dw && dw.id, floors.map(f => [f.id, f.mirror, f.dx])])) };
+  const tower = { seed, phase: phaseIdx, N, BASE, FH, H: BASE + 100, solids, goal, floors, hazards: haz, structs, xMin: -300, stats, log, spawn: { x: -220, y: BASE - CFG.player.h },
+                  hash: hashStr(JSON.stringify(floors.map(f => [f.id, f.mirror, f.dx]))) };
   // validação final da torre inteira (rota completa)
-  let ok = true, p0 = D ? D.exit : solids[0];
+  let ok = true, p0 = solids[0];
   stats.dropped = 0; // reparo: obstáculo que só falha com os tetos dos andares de cima é removido (nunca a rota)
-  for (let fi = 0; fi < floors.length; fi++) { const f = floors[fi]; let v = validatePairs(p0, f.route, solids.concat(blk)); const fy = SY0 - fi * FH;
+  for (let fi = 0; fi < floors.length; fi++) { const f = floors[fi]; let v = validatePairs(p0, f.route, solids.concat(blk)); const fy = BASE - fi * FH;
     const isB = h => h.type === 'spike' || h.type === 'rspike';
     while (!v.ok && haz.some(isB)) {
       let bi = haz.findIndex(isB); haz.forEach((h, i) => { if (isB(h) && Math.abs(h.y - fy) < Math.abs(haz[bi].y - fy)) bi = i; });
@@ -602,7 +541,7 @@ function render(p) {
   const g = ctx.createLinearGradient(0,0,0,cv.height); g.addColorStop(0,'#1b1440'); g.addColorStop(1,'#0e0b1a');
   ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle = g; ctx.fillRect(0,0,cv.width,cv.height);
   ctx.setTransform(Cam.scale,0,0,Cam.scale,-Cam.x*Cam.scale,-Cam.y*Cam.scale);
-  if (App.tower) { Level.structs.forEach((s, i) => { const g = Level.segs[i]; ctx.fillStyle = STY[s.id].bg; ctx.fillRect(40, g.y0, Level.W - 80, g.y1 - g.y0); });
+  if (App.tower) { Level.structs.forEach((s, i) => { const y1 = Level.BASE - 2 * i * Level.FH; ctx.fillStyle = STY[s.id].bg; ctx.fillRect(40, y1 - 2 * Level.FH, Level.W - 80, 2 * Level.FH); });
     ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.font = 'bold 22px system-ui,sans-serif'; ctx.fillText('ENTRADA ➜', -250, Level.BASE - 50); }
   for (const s of Level.solids) {
     if (s.y > Cam.y + Cam.vh || s.y + s.h < Cam.y) continue;
@@ -611,7 +550,7 @@ function render(p) {
     if (s.kind === 'plat' || s.kind === 'goal') { ctx.fillStyle = 'rgba(255,255,255,.25)'; ctx.fillRect(s.x, s.y, s.w, 4); }
   }
   ctx.font = '14px system-ui,sans-serif'; ctx.fillStyle = 'rgba(255,255,255,.18)';
-  for (let f = 0; f < (Level.segs ? 0 : Level.N); f++) { const y = Level.BASE - f * Level.FH; ctx.fillRect(40, y, Level.W - 80, 1); ctx.fillText('ANDAR ' + (f + 1), 50, y - 6); }
+  for (let f = 0; f < Level.N; f++) { const y = Level.BASE - f * Level.FH; ctx.fillRect(40, y, Level.W - 80, 1); ctx.fillText('ANDAR ' + (f + 1), 50, y - 6); }
   drawHazards(); const gl = Level.goal; ctx.fillStyle = '#fff'; ctx.fillRect(gl.x + gl.w/2, gl.y - 46, 3, 46);
   ctx.fillStyle = '#e63946'; ctx.fillRect(gl.x + gl.w/2 + 3, gl.y - 46, 24, 14);
   ctx.globalAlpha = p.state === 'dead' ? .4 : p.invul > 0 && Math.floor(p.invul * 12) % 2 ? .4 : 1; ctx.fillStyle = App.color; ctx.fillRect(p.x, p.y, p.w, p.h); if (p.hurtT > 0) { ctx.fillStyle = '#fff'; ctx.fillRect(p.x, p.y, p.w, p.h); } if (p.sliding) { ctx.fillStyle = 'rgba(255,255,255,.4)'; ctx.fillRect(p.x, p.y, p.w, p.h); }
@@ -640,7 +579,7 @@ function render(p) {
     App.tower.log.slice(-3).forEach(l => lines.push(`rejeitado andar ${l.floor} [${l.tpl}]: ${l.why}`)); }
   if (debug) lines.push(`lava y ${Lava.y|0} v ${Lava.v.toFixed(1)} · distância ${(Lava.y - p.y - p.h)|0}px · invul ${p.invul.toFixed(2)}`); if (debug) lines.push(`vx ${p.vx|0} vy ${p.vy|0} chão ${p.grounded} parede ${p.wallDir} deslizando ${p.sliding}`);
   ctx.font = `bold ${18*d}px system-ui,sans-serif`; ctx.fillStyle = '#fff';
-  ctx.fillText(`${Level.segs ? 'ESTRUTURA ' + fl + '/' + Level.segs.length : 'ANDAR ' + fl + '/' + Level.N}  ·  ${fmt(Game.t)}`, (14+SA.l)*d, (28+SA.t)*d);
+  ctx.fillText(`ANDAR ${fl}/${Level.N}  ·  ${fmt(Game.t)}`, (14+SA.l)*d, (28+SA.t)*d);
   ctx.font = `${12*d}px system-ui,sans-serif`; ctx.fillStyle = 'rgba(255,255,255,.7)';
   ctx.fillText(App.tower ? `Fase ${App.phase+1} · ${CFG.phases[App.phase].name} · seed ${App.seed}` : 'Torre manual (teste)', (14+SA.l)*d, (46+SA.t)*d);
   { const dist = Lava.y - (p.y + p.h), near = p.state === 'active' && dist < CFG.lavaWarn, k = near ? 1 - Math.max(0, dist) / CFG.lavaWarn : 0; // HUD: corações, aviso de lava
@@ -672,7 +611,7 @@ function render(p) {
     ctx.fillStyle = 'rgba(8,6,20,.72)'; ctx.fillRect(0, 0, cv.width, cv.height); ctx.textAlign = 'center'; ctx.fillStyle = '#ff4d5e'; ctx.font = `bold ${34*d}px system-ui,sans-serif`;
     ctx.fillText('FOI RESENHADO', cv.width/2, cv.height*0.40); ctx.fillStyle = '#fff'; ctx.font = `${18*d}px system-ui,sans-serif`;
     ctx.fillText(p.cause === 'lava' ? 'A lava te alcançou (morte direta)' : 'Você perdeu os dois corações', cv.width/2, cv.height*0.47);
-    ctx.fillText(where(p.y + p.h) + ' · ' + fmt(Game.t), cv.width/2, cv.height*0.52);
+    ctx.fillText('Andar ' + Level.floorOf(p.y + p.h) + '/' + Level.N + ' · ' + fmt(Game.t), cv.width/2, cv.height*0.52);
     ctx.font = `${15*d}px system-ui,sans-serif`; ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.fillText('Sem outros jogadores ativos para assistir (espectador só no multiplayer)', cv.width/2, cv.height*0.58, cv.width - 24*d);
     if (Game.endT > .8) ctx.fillText(Input.isTouch() ? 'PULAR: nova torre (nova seed) · ☰: menu' : 'Espaço: nova torre (nova seed)', cv.width/2, cv.height*0.63); ctx.textAlign = 'left'; }
   else if (Game.done) {
@@ -702,7 +641,7 @@ function loadTower(fresh) {
 }
 loadTower(false); Object.assign(player, newPlayer());
 const fmt = t => `${Math.floor(t/60)}:${(t%60).toFixed(1).padStart(4,'0')}`;
-function structAt(p) { const T = App.tower; return T && T.structs ? T.structs[Level.floorOf(p.y + p.h) - 1] || null : null; }
+function structAt(p) { const T = App.tower; return T && T.structs ? T.structs[(Level.floorOf(p.y + p.h) - 1) >> 1] || null : null; }
 function resetGame(fresh) { if (fresh) loadTower(true); Object.assign(player, newPlayer()); Game.t = 0; Game.started = false; Game.done = false; Game.over = false; Game.endT = 0; Game.hits = 0; Game.cd = 0; Game.entered = false; Game.curS = null; Game.banner = null; Lava.mult = 1; player.pushCd = 0; player.pushT = 0; player.safe = null; Obstacles.reset(); Lava.reset(); }
 let last = performance.now(), acc = 0, first = true;
 function frame(now) {
