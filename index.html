@@ -212,6 +212,34 @@ function themed(c, rng, st, haz, pi) {
     haz.push(h);
   }
 }
+
+/* ===== core/Sprites.js — carrega PNGs da pasta assets/images/. Arquivo ausente = o jogo usa a forma antiga (nunca quebra) =====
+   Regras: cada quadro = 32x32 px. Uma imagem pode ter vários quadros LADO A LADO (tira horizontal): o jogo conta sozinho (largura / 32).
+   Para ligar uma arte nova: salve o PNG com o nome certo na pasta certa. Não precisa mexer no código. */
+const SPR = {
+  base: 'assets/images/', frame: 32, fps: 8, img: {}, pat: {},
+  dim: { /* tamanho de desenho no mundo (px), se quiser diferente de 32x32. Ex.: 'enemies/shark': [48, 48] */ },
+  files: ['player/idle', 'player/walk', 'player/run', 'player/jump', 'player/fall', 'player/wall', 'player/hurt', 'player/dead', 'player/push',
+    'enemies/monkey', 'enemies/banana', 'enemies/zombie', 'enemies/ghost', 'enemies/shark', 'enemies/eel', 'obstacles/saw', 'tiles/plat', 'tiles/wall', 'tiles/floor', 'tiles/goal'],
+  load() { for (const id of [...STRUCTS, ...(typeof DRAWN === 'undefined' ? [] : DRAWN)].map(s => s.id)) this.files.push('tiles/' + id + '_plat', 'tiles/' + id + '_wall'); // estrutura nova ganha texturas só pelo nome (id)
+    for (const k of this.files) { const im = new Image(); im.onload = () => { this.img[k] = im; }; im.src = this.base + k + '.png'; } },
+  has(k) { return !!this.img[k]; },
+  at(ctx, k, x, y, flip = false, anchor = 'c', rot = 0, frame = null) { // anchor: 'c' centro em (x,y) · 'b' base centralizada em (x,y)
+    const im = this.img[k]; if (!im) return false;
+    const [w, h] = this.dim[k] || [32, 32], n = Math.max(1, Math.floor(im.width / this.frame)), f = frame != null ? Math.min(frame, n - 1) : Math.floor(performance.now() / 1000 * this.fps) % n;
+    ctx.imageSmoothingEnabled = false; ctx.save(); ctx.translate(x, anchor === 'b' ? y - h / 2 : y); if (rot) ctx.rotate(rot); if (flip) ctx.scale(-1, 1);
+    ctx.drawImage(im, f * this.frame, 0, this.frame, im.height, -w / 2, -h / 2, w, h); ctx.restore(); return true; },
+  player(ctx, p) { // escolhe o quadro pelo estado do jogador; se faltar a arte do estado, cai para a mais parecida
+    const mv = Math.abs(p.vx) > 8, want = p.state === 'dead' ? ['dead', 'hurt'] : p.hurtT > 0 ? ['hurt'] : (p.pushT || 0) > 0 ? ['push'] : p.sliding ? ['wall'] : !p.grounded ? [p.vy < 0 ? 'jump' : 'fall'] : mv ? [Math.abs(p.vx) > CFG.walk + 20 ? 'run' : 'walk', 'walk'] : [];
+    for (const s of [...want, 'idle']) if (this.has('player/' + s)) return this.at(ctx, 'player/' + s, p.x + p.w / 2, p.y + p.h, p.face < 0, 'b');
+    return false; },
+  tile(ctx, s, sh) { // textura repetida em plataformas/paredes/chão
+    const ks = s.kind === 'wall' ? ['tiles/' + s.sk + '_wall', 'tiles/wall'] : s.kind === 'floor' ? ['tiles/floor'] : s.kind === 'goal' ? ['tiles/goal', 'tiles/plat'] : ['tiles/' + s.sk + '_plat', 'tiles/plat'];
+    const k = ks.find(q => this.img[q]); if (!k) return false;
+    if (!this.pat[k]) { const im = this.img[k], c = document.createElement('canvas'); c.width = c.height = this.frame; c.getContext('2d').drawImage(im, 0, 0, this.frame, im.height, 0, 0, this.frame, this.frame); this.pat[k] = ctx.createPattern(c, 'repeat'); }
+    ctx.imageSmoothingEnabled = false; ctx.save(); ctx.translate(s.x + sh, s.y); ctx.fillStyle = this.pat[k]; ctx.fillRect(0, 0, s.w, s.h); ctx.restore(); return true; }
+};
+SPR.load();
 /* ===== entities/Hazard.js + systems/ObstacleSystem.js (lote 1: espinhos fixos, retráteis, pisos temporários) ===== */
 CFG.obst = { spike: { w: 36, h: 14 }, rspike: { w: 40, h: 16, safe: 1.4, warn: 0.6, on: 1.0, ret: 0.3 }, temp: { warn: 1.0, gone: 2.5, back: 0.4 } };
 Object.assign(CFG.obst, { spin: { R: 56, sp: 1.0 }, zombie: { speed: 42 }, crumble: { warn: 0.8 } });
@@ -482,17 +510,18 @@ function drawHazards() {
     if (h.y > Cam.y + Cam.vh || h.y + h.h < Cam.y) continue;
     const st = Obstacles.state(h, t);
     if (h.type === 'ghost' || h.type === 'shark') { const f = Obstacles.fpos(h, t);
-      if (h.type === 'ghost') { ctx.fillStyle = 'rgba(235,240,255,.85)'; ctx.beginPath(); ctx.arc(f.x, f.y - 3, 13, Math.PI, 0); ctx.lineTo(f.x + 13, f.y + 12); ctx.lineTo(f.x + 4, f.y + 8); ctx.lineTo(f.x - 4, f.y + 12); ctx.lineTo(f.x - 13, f.y + 8); ctx.closePath(); ctx.fill(); ctx.fillStyle = '#222'; ctx.fillRect(f.x - 6, f.y - 6, 4, 5); ctx.fillRect(f.x + 2, f.y - 6, 4, 5); }
+      if (SPR.at(ctx, h.type === 'ghost' ? 'enemies/ghost' : 'enemies/shark', f.x, f.y, f.d < 0)) { /* arte própria */ }
+      else if (h.type === 'ghost') { ctx.fillStyle = 'rgba(235,240,255,.85)'; ctx.beginPath(); ctx.arc(f.x, f.y - 3, 13, Math.PI, 0); ctx.lineTo(f.x + 13, f.y + 12); ctx.lineTo(f.x + 4, f.y + 8); ctx.lineTo(f.x - 4, f.y + 12); ctx.lineTo(f.x - 13, f.y + 8); ctx.closePath(); ctx.fill(); ctx.fillStyle = '#222'; ctx.fillRect(f.x - 6, f.y - 6, 4, 5); ctx.fillRect(f.x + 2, f.y - 6, 4, 5); }
       else { ctx.fillStyle = '#7f94a8'; ctx.beginPath(); ctx.ellipse(f.x, f.y, 24, 11, 0, 0, 6.29); ctx.fill(); ctx.beginPath(); ctx.moveTo(f.x - 4 * f.d, f.y - 9); ctx.lineTo(f.x - 12 * f.d, f.y - 22); ctx.lineTo(f.x + 6 * f.d, f.y - 9); ctx.fill(); ctx.fillStyle = '#fff'; ctx.fillRect(f.x + 14 * f.d - 2, f.y - 4, 4, 4); } continue; }
-    if (h.type === 'eel') { ctx.fillStyle = '#2b4a5a'; ctx.beginPath(); ctx.ellipse(h.cx, h.cy + 2, 20, 8, 0, 0, 6.29); ctx.fill(); ctx.fillStyle = '#f2e04a'; ctx.fillRect(h.cx + 10, h.cy - 2, 4, 4);
+    if (h.type === 'eel') { if (!SPR.at(ctx, 'enemies/eel', h.cx, h.cy, false, 'c', 0, { safe: 0, warn: 1, on: 2, ret: 3 }[st])) { ctx.fillStyle = '#2b4a5a'; ctx.beginPath(); ctx.ellipse(h.cx, h.cy + 2, 20, 8, 0, 0, 6.29); ctx.fill(); ctx.fillStyle = '#f2e04a'; ctx.fillRect(h.cx + 10, h.cy - 2, 4, 4); }
       if (st === 'warn') { ctx.strokeStyle = 'rgba(255,240,90,.6)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(h.cx, h.cy, h.R * .5 + (Math.floor(t * 10) % 2) * 6, 0, 6.29); ctx.stroke(); }
       if (st === 'on') { ctx.fillStyle = 'rgba(255,240,90,.28)'; ctx.beginPath(); ctx.arc(h.cx, h.cy, h.R, 0, 6.29); ctx.fill(); ctx.strokeStyle = '#fff36a'; ctx.lineWidth = 3; ctx.beginPath(); for (let i = 0; i < 6; i++) { const a = i * 1.05 + t * 9; ctx.moveTo(h.cx, h.cy); ctx.lineTo(h.cx + Math.cos(a) * h.R, h.cy + Math.sin(a + .6) * h.R); } ctx.stroke(); } continue; }
-    if (h.type === 'monkey') { ctx.fillStyle = '#8b5a2b'; ctx.fillRect(h.mx, h.my, 24, 26); ctx.fillStyle = '#e8c9a0'; ctx.fillRect(h.mx + 6, h.my + 6, 12, 10); ctx.fillStyle = '#111'; ctx.fillRect(h.mx + 8, h.my + 8, 3, 3); ctx.fillRect(h.mx + 14, h.my + 8, 3, 3);
-      const u = (t + h.ph) % h.T; if (u < h.fl) { const b = Obstacles.banana(h, u); ctx.fillStyle = '#ffe14d'; ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(u * 8); ctx.fillRect(-7, -3, 14, 6); ctx.restore(); } continue; }
-    if (h.type === 'saw') { const z = Obstacles.zpos(h, t), cx = z.x + 14, cy = h.y + 14; ctx.fillStyle = '#c9d1d9'; ctx.beginPath(); for (let i = 0; i < 16; i++) { const a = i * .3927 + t * 12 * z.dir, r = i % 2 ? 11 : 15; ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); } ctx.closePath(); ctx.fill(); ctx.fillStyle = '#444'; ctx.beginPath(); ctx.arc(cx, cy, 4, 0, 6.29); ctx.fill(); continue; }
+    if (h.type === 'monkey') { if (!SPR.at(ctx, 'enemies/monkey', h.mx + 12, h.my + 26, h.bvx < 0, 'b')) { ctx.fillStyle = '#8b5a2b'; ctx.fillRect(h.mx, h.my, 24, 26); ctx.fillStyle = '#e8c9a0'; ctx.fillRect(h.mx + 6, h.my + 6, 12, 10); ctx.fillStyle = '#111'; ctx.fillRect(h.mx + 8, h.my + 8, 3, 3); ctx.fillRect(h.mx + 14, h.my + 8, 3, 3); }
+      const u = (t + h.ph) % h.T; if (u < h.fl) { const b = Obstacles.banana(h, u); if (!SPR.at(ctx, 'enemies/banana', b.x, b.y, false, 'c', u * 8)) { ctx.fillStyle = '#ffe14d'; ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(u * 8); ctx.fillRect(-7, -3, 14, 6); ctx.restore(); } } continue; }
+    if (h.type === 'saw') { const z = Obstacles.zpos(h, t), cx = z.x + 14, cy = h.y + 14; if (SPR.at(ctx, 'obstacles/saw', cx, cy)) continue; ctx.fillStyle = '#c9d1d9'; ctx.beginPath(); for (let i = 0; i < 16; i++) { const a = i * .3927 + t * 12 * z.dir, r = i % 2 ? 11 : 15; ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); } ctx.closePath(); ctx.fill(); ctx.fillStyle = '#444'; ctx.beginPath(); ctx.arc(cx, cy, 4, 0, 6.29); ctx.fill(); continue; }
     if (h.type === 'piston') { const e = st === 'on' ? 1 : st === 'ret' ? .35 : st === 'warn' ? .12 : 0, sh = st === 'warn' ? Math.sin(t * 80) * 1.5 : 0, len = 16 + e * (h.h - 16);
       ctx.fillStyle = '#4a4f57'; ctx.fillRect(h.x + 14, h.y - 40, 12, 24 + len); ctx.fillStyle = st === 'warn' ? '#ffb347' : '#8a929c'; ctx.fillRect(h.x + sh, h.y + len - 16, h.w, 16); ctx.fillStyle = '#ff4d5e'; ctx.fillRect(h.x + sh, h.y + len - 4, h.w, 4); continue; }
-    if (h.type === 'zombie') { const z = Obstacles.zpos(h, t); ctx.fillStyle = '#7bc36d'; ctx.fillRect(z.x, h.y, 24, h.h); ctx.fillStyle = '#1b1b1b'; ctx.fillRect(z.x + (z.dir > 0 ? 14 : 4), h.y + 7, 6, 6); ctx.fillStyle = '#ff4d5e'; ctx.fillRect(z.x + (z.dir > 0 ? 20 : 0), h.y + 18, 4, 5); continue; }
+    if (h.type === 'zombie') { const z = Obstacles.zpos(h, t); if (SPR.at(ctx, 'enemies/zombie', z.x + 12, h.y + h.h, z.dir < 0, 'b')) continue; ctx.fillStyle = '#7bc36d'; ctx.fillRect(z.x, h.y, 24, h.h); ctx.fillStyle = '#1b1b1b'; ctx.fillRect(z.x + (z.dir > 0 ? 14 : 4), h.y + 7, 6, 6); ctx.fillStyle = '#ff4d5e'; ctx.fillRect(z.x + (z.dir > 0 ? 20 : 0), h.y + 18, 4, 5); continue; }
     if (h.type === 'spin') { const a = h.a0 + h.sp * t; ctx.strokeStyle = 'rgba(255,77,94,.2)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(h.cx, h.cy, h.R, 0, 6.29); ctx.stroke();
       ctx.strokeStyle = '#ff4d5e'; ctx.lineWidth = 8; ctx.beginPath(); ctx.moveTo(h.cx, h.cy); ctx.lineTo(h.cx + Math.cos(a) * h.R, h.cy + Math.sin(a) * h.R); ctx.stroke(); ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(h.cx, h.cy, 8, 0, 6.29); ctx.fill(); continue; }
     if (h.type === 'rspike') { ctx.fillStyle = '#4a2a35'; ctx.fillRect(h.x, h.y + h.h - 4, h.w, 4); }
@@ -546,16 +575,16 @@ function render(p) {
   for (const s of Level.solids) {
     if (s.y > Cam.y + Cam.vh || s.y + s.h < Cam.y) continue;
     if (s.off) continue; const T = s.temp, sh = T && T.state === 'warn' ? Math.sin(Game.t * 90) * 1.5 : 0;
-    ctx.fillStyle = T && T.state === 'warn' ? '#ffb347' : T && T.mode === 'crumble' ? '#b07a4f' : (s.kind === 'plat' && s.sk && STY[s.sk] ? STY[s.sk].plat : COL[s.kind]); ctx.globalAlpha = T && T.state === 'back' ? .5 : 1; ctx.fillRect(s.x + sh, s.y, s.w, s.h); ctx.globalAlpha = 1;
+    ctx.fillStyle = T && T.state === 'warn' ? '#ffb347' : T && T.mode === 'crumble' ? '#b07a4f' : (s.kind === 'plat' && s.sk && STY[s.sk] ? STY[s.sk].plat : COL[s.kind]); ctx.globalAlpha = T && T.state === 'back' ? .5 : 1; if (T || !SPR.tile(ctx, s, sh)) ctx.fillRect(s.x + sh, s.y, s.w, s.h); ctx.globalAlpha = 1;
     if (s.kind === 'plat' || s.kind === 'goal') { ctx.fillStyle = 'rgba(255,255,255,.25)'; ctx.fillRect(s.x, s.y, s.w, 4); }
   }
   ctx.font = '14px system-ui,sans-serif'; ctx.fillStyle = 'rgba(255,255,255,.18)';
   for (let f = 0; f < Level.N; f++) { const y = Level.BASE - f * Level.FH; ctx.fillRect(40, y, Level.W - 80, 1); ctx.fillText('ANDAR ' + (f + 1), 50, y - 6); }
   drawHazards(); const gl = Level.goal; ctx.fillStyle = '#fff'; ctx.fillRect(gl.x + gl.w/2, gl.y - 46, 3, 46);
   ctx.fillStyle = '#e63946'; ctx.fillRect(gl.x + gl.w/2 + 3, gl.y - 46, 24, 14);
-  ctx.globalAlpha = p.state === 'dead' ? .4 : p.invul > 0 && Math.floor(p.invul * 12) % 2 ? .4 : 1; ctx.fillStyle = App.color; ctx.fillRect(p.x, p.y, p.w, p.h); if (p.hurtT > 0) { ctx.fillStyle = '#fff'; ctx.fillRect(p.x, p.y, p.w, p.h); } if (p.sliding) { ctx.fillStyle = 'rgba(255,255,255,.4)'; ctx.fillRect(p.x, p.y, p.w, p.h); }
+  ctx.globalAlpha = p.state === 'dead' ? .4 : p.invul > 0 && Math.floor(p.invul * 12) % 2 ? .4 : 1; const sp = SPR.player(ctx, p); if (!sp) { ctx.fillStyle = App.color; ctx.fillRect(p.x, p.y, p.w, p.h); if (p.hurtT > 0) { ctx.fillStyle = '#fff'; ctx.fillRect(p.x, p.y, p.w, p.h); } if (p.sliding) { ctx.fillStyle = 'rgba(255,255,255,.4)'; ctx.fillRect(p.x, p.y, p.w, p.h); }
   ctx.fillStyle = '#fff'; ctx.fillRect(p.x + (p.face > 0 ? 12 : 3), p.y + 7, 7, 7);
-  ctx.fillStyle = '#111'; ctx.fillRect(p.x + (p.face > 0 ? 16 : 3), p.y + 9, 3, 4);
+  ctx.fillStyle = '#111'; ctx.fillRect(p.x + (p.face > 0 ? 16 : 3), p.y + 9, 3, 4); }
   ctx.globalAlpha = 1;
   if (p.invul > 0) { ctx.strokeStyle = `rgba(90,220,255,${.5 + .3 * Math.sin(Game.t * 14 + p.invul * 14)})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(p.x + p.w / 2, p.y + p.h / 2, 24, 0, 6.29); ctx.stroke(); } // escudo = invulnerável
   if ((p.pushT || 0) > 0) { const k = 1 - p.pushT / CFG.push.anim; ctx.save(); ctx.translate(p.x + p.w / 2, p.y + p.h / 2); ctx.scale(p.pushFace || 1, 1); ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(0, 0, 18 + CFG.push.range * k, -.9, .9); ctx.stroke(); ctx.restore(); }
