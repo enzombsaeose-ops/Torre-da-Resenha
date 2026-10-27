@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Editor de Estruturas — TORRE DA RESENHA</title>
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0;background:#0e0b1a;color:#fff;font:14px system-ui,sans-serif;overscroll-behavior:none;-webkit-tap-highlight-color:transparent}
+body{padding:env(safe-area-inset-top) env(safe-area-inset-right) 150px env(safe-area-inset-left)}
+header{display:flex;flex-wrap:wrap;gap:6px;padding:8px;position:sticky;top:0;background:#0e0b1a;z-index:5}
+header input,header select{background:#1d1840;color:#fff;border:1px solid #3a3470;border-radius:8px;padding:8px;font:inherit;min-width:0}
+header input{flex:1 1 140px}
+#wrap{display:flex;justify-content:center}
+#ed{touch-action:none;background:#14102b;border:1px solid #3a3470}
+#ed.scroll{touch-action:pan-y}
+#bar{position:fixed;left:0;right:0;bottom:0;background:#171233;border-top:1px solid #3a3470;padding:6px 6px calc(6px + env(safe-area-inset-bottom));z-index:6}
+.pal{display:flex;gap:5px;overflow-x:auto;padding-bottom:6px}
+.pal button{flex:0 0 auto;min-width:46px;height:46px;border-radius:10px;border:2px solid #3a3470;background:#1d1840;color:#fff;font:bold 15px system-ui;line-height:1}
+.pal button small{display:block;font:9px system-ui;opacity:.8;margin-top:2px}
+.pal button.on{border-color:#ffd23f;background:#3a3470}
+.row{display:flex;gap:5px;flex-wrap:wrap}
+.row button{flex:1 1 70px;padding:10px 6px;border-radius:10px;border:0;background:#2b2f66;color:#fff;font:bold 13px system-ui}
+.row .go{background:#2a9d5c}
+#msg{padding:4px 8px;color:#ffb347;min-height:20px;font-size:13px}
+#io{position:fixed;inset:0;background:rgba(8,6,20,.96);z-index:20;display:none;flex-direction:column;gap:8px;padding:14px}
+#io textarea{flex:1;background:#14102b;color:#cfe;border:1px solid #3a3470;border-radius:8px;padding:8px;font:12px monospace}
+#io .row button{min-height:44px}
+#game{position:fixed;inset:0;z-index:30;display:none;background:#0e0b1a;touch-action:none}
+#game canvas{width:100%;height:100%;display:block}
+.tc{position:absolute;bottom:calc(24px + env(safe-area-inset-bottom));width:72px;height:72px;border-radius:18px;border:0;background:rgba(255,255,255,.22);color:#fff;font:bold 13px system-ui;touch-action:none;user-select:none;-webkit-user-select:none}
+.tc.on{background:rgba(255,255,255,.55)}
+#gi{position:absolute;top:calc(8px + env(safe-area-inset-top));left:10px;right:10px;display:flex;justify-content:space-between;font-weight:bold;text-shadow:0 1px 3px #000}
+#gx{position:absolute;top:calc(8px + env(safe-area-inset-top));right:10px;width:44px;height:44px;border-radius:12px;border:0;background:rgba(255,255,255,.25);color:#fff;font:bold 18px system-ui}
+</style></head><body>
+<header>
+  <input id="nome" placeholder="Nome da estrutura (ex.: Cemitério)" maxlength="40">
+  <select id="tam"><option>Grande</option><option selected>Média</option><option>Pequena</option></select>
+  <select id="dif"><option>Fácil</option><option selected>Média</option><option>Difícil</option></select>
+</header>
+<div id="msg"></div>
+<div id="wrap"><canvas id="ed"></canvas></div>
+
+<div id="bar">
+  <div class="pal" id="pal"></div>
+  <div class="row">
+    <button id="bMode">MODO: PINTAR</button>
+    <button id="bUndo">DESFAZER</button>
+    <button id="bAdd">+ LINHA</button>
+    <button id="bDel">− LINHA</button>
+    <button id="bTest" class="go">TESTAR</button>
+    <button id="bExp">EXPORTAR / IMPORTAR</button>
+  </div>
+</div>
+
+<div id="io">
+  <b>Exportar / Importar</b>
+  <div style="font-size:13px;opacity:.8">Copie o texto abaixo e cole no chat para eu colocar a estrutura no jogo. Para carregar uma estrutura, cole o texto aqui e toque em IMPORTAR.</div>
+  <textarea id="txt" spellcheck="false"></textarea>
+  <div class="row"><button id="bCopy" class="go">COPIAR</button><button id="bImp">IMPORTAR</button><button id="bClear">LIMPAR TUDO</button><button id="bClose">FECHAR</button></div>
+</div>
+
+<div id="game">
+  <canvas id="gc"></canvas>
+  <div id="gi"><span id="gl"></span><span id="gr"></span></div>
+  <button id="gx">✕</button>
+  <button class="tc" id="tL" style="left:14px">◀</button>
+  <button class="tc" id="tR" style="left:96px">▶</button>
+  <button class="tc" id="tS" style="right:14px;bottom:calc(110px + env(safe-area-inset-bottom))">CORRER</button>
+  <button class="tc" id="tJ" style="right:14px;width:96px;height:80px">PULAR</button>
+</div>
+
+<script>
+"use strict";
+/* ===== Editor de estruturas — cada quadradinho = 50 px do jogo ===== */
+const COLS = 18, CELL = 50;
+const TILES = [
+  ['.', 'apagar', '#0000'],
+  ['#', 'plataforma', '#5b6ee1'],
+  ['|', 'parede', '#2d3057'],
+  ['^', 'espinho', '#ff4d5e'],
+  ['Z', 'zumbi', '#7bc36d'],
+  ['G', 'fantasma', '#dfe6ff'],
+  ['S', 'serra', '#c9d1d9'],
+  ['P', 'pistão', '#8a929c'],
+  ['T', 'tubarão', '#7f94a8'],
+  ['N', 'enguia', '#f2e04a'],
+  ['M', 'macaco', '#8b5a2b'],
+  ['E', 'entrada', '#2ecc71'],
+  ['X', 'saída', '#f2c94c']
+];
+const INFO = Object.fromEntries(TILES.map(t => [t[0], t]));
+const SOLID = c => c === '#' || c === '|';
+const HAZ = c => '^ZGSPTNM'.includes(c);
+let grid = [], tool = '#', undo = [], scrollMode = false;
+const $ = id => document.getElementById(id);
+const ed = $('ed'), ex = ed.getContext('2d');
+
+function blank(r) { return Array.from({ length: r }, (_, i) => i === r - 1 ? '#'.repeat(COLS) : '.'.repeat(COLS)); }
+function save() { try { localStorage.setItem('torre-editor', JSON.stringify(dump())); } catch (e) {} }
+function load() { try { const s = localStorage.getItem('torre-editor'); if (s) { apply(JSON.parse(s)); return; } } catch (e) {} grid = blank(14).map(r => r.split('')); }
+function dump() { return { nome: $('nome').value, tamanho: $('tam').value, dificuldade: $('dif').value, cols: COLS, grade: grid.map(r => r.join('')) }; }
+function apply(o) {
+  if (!o || !Array.isArray(o.grade) || !o.grade.length) throw new Error('formato inválido');
+  const g = o.grade.map(r => r.padEnd(COLS, '.').slice(0, COLS).split(''));
+  grid = g; $('nome').value = o.nome || ''; if (o.tamanho) $('tam').value = o.tamanho; if (o.dificuldade) $('dif').value = o.dificuldade;
+}
+function cs() { return Math.max(18, Math.floor(Math.min(innerWidth - 4, 560) / COLS)); }
+function draw() {
+  const s = cs(), d = devicePixelRatio || 1, W = COLS * s, H = grid.length * s;
+  ed.style.width = W + 'px'; ed.style.height = H + 'px'; ed.width = W * d; ed.height = H * d; ex.setTransform(d, 0, 0, d, 0, 0);
+  ex.clearRect(0, 0, W, H); ex.font = `bold ${s * .6}px system-ui`; ex.textAlign = 'center'; ex.textBaseline = 'middle';
+  for (let r = 0; r < grid.length; r++) for (let c = 0; c < COLS; c++) {
+    const k = grid[r][c], x = c * s, y = r * s;
+    if (k !== '.') { ex.fillStyle = INFO[k][2]; ex.fillRect(x, y, s, s); if (!SOLID(k)) { ex.fillStyle = k === 'G' || k === 'S' || k === 'X' || k === 'N' ? '#111' : '#fff'; ex.fillText(k, x + s / 2, y + s / 2 + 1); } }
+    ex.strokeStyle = 'rgba(255,255,255,.08)'; ex.strokeRect(x + .5, y + .5, s, s);
+  }
+  ex.fillStyle = 'rgba(255,255,255,.35)'; ex.font = `${s * .4}px system-ui`; ex.textAlign = 'left';
+  for (let r = 0; r < grid.length; r += 2) ex.fillText(String(grid.length - r), 2, r * s + s * .35); // altura em linhas (de baixo p/ cima)
+}
+function cellAt(e) { const b = ed.getBoundingClientRect(), s = cs(); return [Math.floor((e.clientY - b.top) / s), Math.floor((e.clientX - b.left) / s)]; }
+let painting = false, snap = null;
+function put(r, c) {
+  if (r < 0 || c < 0 || r >= grid.length || c >= COLS || grid[r][c] === tool) return;
+  if (tool === 'E' || tool === 'X') for (const row of grid) for (let i = 0; i < COLS; i++) if (row[i] === tool) row[i] = '.'; // só uma entrada e uma saída
+  grid[r][c] = tool; draw();
+}
+ed.addEventListener('pointerdown', e => { if (scrollMode) return; painting = true; ed.setPointerCapture(e.pointerId); snap = grid.map(r => r.join('')); const [r, c] = cellAt(e); put(r, c); });
+ed.addEventListener('pointermove', e => { if (painting) { const [r, c] = cellAt(e); put(r, c); } });
+for (const t of ['pointerup', 'pointercancel']) ed.addEventListener(t, () => { if (!painting) return; painting = false; if (snap && snap.join() !== grid.map(r => r.join('')).join()) { undo.push(snap); if (undo.length > 60) undo.shift(); save(); } });
+ed.addEventListener('contextmenu', e => e.preventDefault());
+
+/* paleta */
+const pal = $('pal');
+TILES.forEach(([k, n]) => { const b = document.createElement('button'); b.innerHTML = (k === '.' ? '⌫' : k) + '<small>' + n + '</small>'; b.onclick = () => { tool = k; [...pal.children].forEach(x => x.classList.remove('on')); b.classList.add('on'); }; if (k === '#') b.classList.add('on'); pal.appendChild(b); });
+$('bMode').onclick = () => { scrollMode = !scrollMode; ed.classList.toggle('scroll', scrollMode); $('bMode').textContent = scrollMode ? 'MODO: ROLAR' : 'MODO: PINTAR'; };
+$('bUndo').onclick = () => { const s = undo.pop(); if (s) { grid = s.map(r => r.split('')); draw(); save(); } };
+$('bAdd').onclick = () => { grid.unshift('.'.repeat(COLS).split('')); undo.length = 0; draw(); save(); };
+$('bDel').onclick = () => { if (grid.length > 6) { grid.shift(); undo.length = 0; draw(); save(); } };
+['nome', 'tam', 'dif'].forEach(i => $(i).addEventListener('input', save));
+
+/* exportar / importar */
+const msg = t => { $('msg').textContent = t || ''; };
+$('bExp').onclick = () => { $('txt').value = JSON.stringify(dump()); $('io').style.display = 'flex'; };
+$('bClose').onclick = () => { $('io').style.display = 'none'; };
+$('bCopy').onclick = async () => { $('txt').select(); try { await navigator.clipboard.writeText($('txt').value); msg('Copiado! Cole no chat.'); } catch (e) { document.execCommand('copy'); msg('Copiado (ou selecione e copie manualmente).'); } };
+$('bImp').onclick = () => { try { apply(JSON.parse($('txt').value)); undo.length = 0; draw(); save(); $('io').style.display = 'none'; msg('Estrutura importada.'); } catch (e) { msg('Não consegui importar: ' + e.message); } };
+$('bClear').onclick = () => { if (confirm('Apagar a estrutura atual?')) { grid = blank(14).map(r => r.split('')); undo.length = 0; draw(); save(); $('io').style.display = 'none'; } };
+
+/* ===== TESTAR: mesma física do jogo (cópia dos valores e do stepPlayer) ===== */
+const CFG = { step: 1 / 120, walk: 230, sprint: 350, groundAccel: 2400, groundDecel: 2800, turnGround: 4200, airAccel: 1800, airDecel: 900, turnAir: 2600,
+  gravity: 1900, cutMult: 2.6, maxFall: 850, jump: 640, coyote: .10, buffer: .12, wallSlide: 90, wallJumpX: 360, wallJumpY: 600, wallLock: .16, lockControl: .35, wallCoyote: .08, pw: 22, ph: 32 };
+const approach = (v, t, d) => v < t ? Math.min(v + d, t) : Math.max(v - d, t);
+const hit = (x, y, w, h, S) => S.some(s => x < s.x + s.w && x + w > s.x && y < s.y + s.h && y + h > s.y);
+function newPlayer(x, y) { return { x, y, w: CFG.pw, h: CFG.ph, vx: 0, vy: 0, face: 1, grounded: false, wallDir: 0, wallSide: 0, wallTime: 0, lastJumpWall: 0, coyote: 0, buffer: 0, lock: 0, sliding: false }; }
+function stepPlayer(p, dt, inp, S) {
+  const ix = (inp.down('right') ? 1 : 0) - (inp.down('left') ? 1 : 0); if (ix) p.face = ix;
+  p.coyote = p.grounded ? CFG.coyote : p.coyote - dt; p.buffer = inp.pressed('jump') ? CFG.buffer : p.buffer - dt;
+  p.wallTime = p.wallDir ? CFG.wallCoyote : p.wallTime - dt; if (p.wallDir) p.wallSide = p.wallDir; if (p.grounded) p.lastJumpWall = 0; p.lock -= dt;
+  const max = inp.down('sprint') ? CFG.sprint : CFG.walk, g = p.grounded; let acc;
+  if (!ix) acc = g ? CFG.groundDecel : CFG.airDecel; else if (Math.sign(p.vx) === -ix) acc = g ? CFG.turnGround : CFG.turnAir; else acc = g ? CFG.groundAccel : CFG.airAccel;
+  if (p.lock > 0) acc *= CFG.lockControl; p.vx = approach(p.vx, ix * max, acc * dt);
+  if (p.buffer > 0) {
+    if (p.coyote > 0) { p.vy = -CFG.jump; p.coyote = 0; p.buffer = 0; p.grounded = false; }
+    else if (p.wallTime > 0 && p.wallSide !== p.lastJumpWall) { p.vx = -p.wallSide * CFG.wallJumpX; p.vy = -CFG.wallJumpY; p.face = -p.wallSide; p.lastJumpWall = p.wallSide; p.lock = CFG.wallLock; p.wallTime = 0; p.buffer = 0; }
+  }
+  let gr = CFG.gravity; if (p.vy < 0 && !inp.down('jump')) gr *= CFG.cutMult;
+  p.vy = Math.min(p.vy + gr * dt, CFG.maxFall);
+  p.sliding = !p.grounded && p.wallDir !== 0 && p.vy > 0 && ix === p.wallDir; if (p.sliding) p.vy = Math.min(p.vy, CFG.wallSlide);
+  p.x += p.vx * dt; for (const s of S) if (p.x < s.x + s.w && p.x + p.w > s.x && p.y < s.y + s.h && p.y + p.h > s.y) { p.x = p.vx > 0 ? s.x - p.w : s.x + s.w; p.vx = 0; }
+  p.y += p.vy * dt; for (const s of S) if (p.x < s.x + s.w && p.x + p.w > s.x && p.y < s.y + s.h && p.y + p.h > s.y) { p.y = p.vy > 0 ? s.y - p.h : s.y + s.h; p.vy = 0; }
+  p.grounded = p.vy >= 0 && hit(p.x, p.y + 1, p.w, p.h, S);
+  p.wallDir = p.grounded ? 0 : hit(p.x - 1, p.y, p.w, p.h, S) ? -1 : hit(p.x + 1, p.y, p.w, p.h, S) ? 1 : 0;
+}
+const gc = $('gc'), gx = gc.getContext('2d'), keys = new Set(), touch = new Set(), pr = new Set();
+const inp = { down: a => keys.has(a) || touch.has(a), pressed: a => pr.has(a) };
+const KM = { KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', Space: 'jump', ShiftLeft: 'sprint', ShiftRight: 'sprint' };
+let T = null, raf = 0;
+addEventListener('keydown', e => { if (!T) return; if (e.code === 'Escape') return stopTest(); const a = KM[e.code]; if (a) { e.preventDefault(); if (!keys.has(a)) pr.add(a); keys.add(a); } });
+addEventListener('keyup', e => { const a = KM[e.code]; if (a) keys.delete(a); });
+for (const [id, a] of [['tL', 'left'], ['tR', 'right'], ['tS', 'sprint'], ['tJ', 'jump']]) { const b = $(id);
+  b.addEventListener('pointerdown', e => { e.preventDefault(); b.setPointerCapture(e.pointerId); if (!touch.has(a)) pr.add(a); touch.add(a); b.classList.add('on'); });
+  for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) b.addEventListener(t, () => { touch.delete(a); b.classList.remove('on'); }); }
+$('gx').onclick = () => stopTest();
+function startTest() {
+  let er = -1, ec = -1; grid.forEach((row, r) => row.forEach((k, c) => { if (k === 'E') { er = r; ec = c; } }));
+  if (er < 0) return msg('Coloque uma ENTRADA (E) antes de testar.');
+  if (!grid.some(r => r.includes('X'))) return msg('Coloque uma SAÍDA (X) antes de testar.');
+  msg('');
+  const S = [], H = []; grid.forEach((row, r) => row.forEach((k, c) => { const b = { x: c * CELL, y: r * CELL, w: CELL, h: CELL, k }; if (SOLID(k)) S.push(b); else if (HAZ(k)) H.push(b); }));
+  const W = COLS * CELL, WH = grid.length * CELL; // paredes laterais invisíveis para não cair do mapa
+  S.push({ x: -40, y: -400, w: 40, h: WH + 800 }, { x: W, y: -400, w: 40, h: WH + 800 });
+  const sx = ec * CELL + (CELL - CFG.pw) / 2, sy = (er + 1) * CELL - CFG.ph;
+  T = { S, H, p: newPlayer(sx, sy), sx, sy, t: 0, deaths: 0, done: false, cam: 0, acc: 0, last: performance.now() };
+  $('game').style.display = 'block'; resizeG(); cancelAnimationFrame(raf); raf = requestAnimationFrame(loopG);
+}
+function stopTest() { T = null; keys.clear(); touch.clear(); $('game').style.display = 'none'; cancelAnimationFrame(raf); }
+function resizeG() { const d = devicePixelRatio || 1; gc.width = innerWidth * d; gc.height = innerHeight * d; }
+addEventListener('resize', () => { draw(); if (T) resizeG(); });
+function loopG(now) {
+  if (!T) return; const dt = Math.min((now - T.last) / 1000, .1); T.last = now; T.acc += dt;
+  while (T.acc >= CFG.step) { T.acc -= CFG.step;
+    if (!T.done) { T.t += CFG.step; const p = T.p; stepPlayer(p, CFG.step, inp, T.S);
+      const dead = p.y > grid.length * CELL + 300 || T.H.some(h => p.x < h.x + h.w - 8 && p.x + p.w > h.x + 8 && p.y < h.y + h.h - 6 && p.y + p.h > h.y + 6);
+      if (dead) { T.deaths++; T.p = newPlayer(T.sx, T.sy); }
+      const X = grid.flatMap((row, r) => row.map((k, c) => k === 'X' ? { x: c * CELL, y: r * CELL } : null)).filter(Boolean)[0];
+      if (X && p.x < X.x + CELL && p.x + p.w > X.x && p.y < X.y + CELL && p.y + p.h > X.y) T.done = true; }
+    pr.clear(); }
+  const d = devicePixelRatio || 1, sc = gc.width / (COLS * CELL), vh = gc.height / sc, p = T.p;
+  T.cam += ((p.y + p.h / 2 - vh * .55) - T.cam) * (1 - Math.exp(-7 * dt)); T.cam = Math.max(Math.min(0, grid.length * CELL - vh), Math.min(grid.length * CELL - vh, T.cam));
+  gx.setTransform(1, 0, 0, 1, 0, 0); gx.fillStyle = '#14102b'; gx.fillRect(0, 0, gc.width, gc.height); gx.setTransform(sc, 0, 0, sc, 0, -T.cam * sc);
+  grid.forEach((row, r) => row.forEach((k, c) => { if (k === '.') return; const x = c * CELL, y = r * CELL; gx.fillStyle = INFO[k][2]; gx.globalAlpha = k === 'E' || k === 'X' ? .35 : 1;
+    if (k === '^') { gx.beginPath(); for (let i = 0; i < 3; i++) { gx.moveTo(x + i * CELL / 3, y + CELL); gx.lineTo(x + (i + .5) * CELL / 3, y + CELL * .35); gx.lineTo(x + (i + 1) * CELL / 3, y + CELL); } gx.fill(); }
+    else { gx.fillRect(x, y, CELL, CELL); if (!SOLID(k)) { gx.globalAlpha = 1; gx.fillStyle = '#111'; gx.font = 'bold 26px system-ui'; gx.textAlign = 'center'; gx.textBaseline = 'middle'; gx.fillText(k, x + CELL / 2, y + CELL / 2); } } gx.globalAlpha = 1; }));
+  gx.fillStyle = '#e63946'; gx.fillRect(p.x, p.y, p.w, p.h); gx.fillStyle = '#fff'; gx.fillRect(p.x + (p.face > 0 ? 12 : 3), p.y + 7, 7, 7);
+  gx.setTransform(1, 0, 0, 1, 0, 0);
+  $('gl').textContent = `Tempo ${T.t.toFixed(1)}s · Quedas/mortes ${T.deaths}`; $('gr').textContent = T.done ? '✔ SAÍDA ALCANÇADA!' : ''; $('gr').style.marginRight = '54px';
+  raf = requestAnimationFrame(loopG);
+}
+$('bTest').onclick = startTest;
+addEventListener('touchmove', e => { if (T) e.preventDefault(); }, { passive: false });
+
+load(); draw();
+</script></body></html>
