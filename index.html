@@ -218,7 +218,8 @@ function themed(c, rng, st, haz, pi) {
    Para ligar uma arte nova: salve o PNG com o nome certo na pasta certa. Não precisa mexer no código. */
 const SPR = {
   base: 'assets/images/', frame: 32, fps: 8, img: {}, pat: {}, st: {}, url: {}, dbg: new URLSearchParams(location.search).has('assets'),
-  dim: { /* tamanho de desenho no mundo (px), se quiser diferente de 32x32. Ex.: 'enemies/shark': [48, 48] */ },
+  dim: { /* tamanho de desenho no mundo (px) [largura, altura]; padrão 32x32. Use múltiplos de 32 (64, 96) para a arte não ficar borrada */
+    'enemies/shark': [64, 64] },
   files: ['player/idle', 'player/walk', 'player/run', 'player/jump', 'player/fall', 'player/wall', 'player/hurt', 'player/dead', 'player/push',
     'enemies/monkey', 'enemies/banana', 'enemies/zombie', 'enemies/ghost', 'enemies/shark', 'enemies/eel', 'obstacles/saw', 'tiles/plat', 'tiles/wall', 'tiles/floor', 'tiles/goal'],
   load() { for (const id of [...STRUCTS, ...(typeof DRAWN === 'undefined' ? [] : DRAWN)].map(s => s.id)) this.files.push('tiles/' + id + '_plat', 'tiles/' + id + '_wall'); // estrutura nova ganha texturas só pelo nome (id)
