@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>TORRE DA RESENHA — Etapa 5 + estruturas</title>
+<style>html,body{margin:0;height:100%;background:#0e0b1a;overflow:hidden}html,body{overscroll-behavior:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}#sa{position:fixed;visibility:hidden;pointer-events:none;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}canvas{display:block;width:100%;height:100%;touch-action:none;user-select:none;-webkit-user-select:none}</style>
+</head><body><canvas id="c"></canvas><div id="sa"></div>
+<script>
+"use strict";
+/* ===== js/config.js — tudo balanceável fica aqui ===== */
+const CFG = {
+  step: 1/120, maxFrame: 0.1, viewH: 700,
+  walk: 230, sprint: 350,
+  groundAccel: 2400, groundDecel: 2800, turnGround: 4200,
+  airAccel: 1800, airDecel: 900, turnAir: 2600,
+  gravity: 1900, cutMult: 2.6, maxFall: 850,
+  jump: 640, coyote: 0.10, buffer: 0.12,
+  wallSlide: 90, wallJumpX: 360, wallJumpY: 600, wallLock: 0.16, lockControl: 0.35, wallCoyote: 0.08,
+  player: { w: 22, h: 32 }, hearts: 3, invul: 3, knock: { vx: 300, vy: -420, lock: .25 }, lavaWarn: 260, // Etapa 5: corações, invulnerabilidade (s), distância do aviso de lava (px)
+  keys: { left:['KeyA','ArrowLeft'], right:['KeyD','ArrowRight'], jump:['Space'], sprint:['ShiftLeft','ShiftRight'],
+          push:['KeyE'], pause:['Escape'], debug:['F3','KeyH'],
+          newTower:['KeyN'], ph1:['Digit1'], ph2:['Digit2'], ph3:['Digit3'], ph4:['Digit4'], ph5:['Digit5'] }
+};
+
+const SA = { t: 0, r: 0, b: 0, l: 0 }; // áreas seguras (recortes/barras do sistema), lidas do CSS env()
+function readSA() { if (typeof getComputedStyle !== 'function') return; const c = getComputedStyle(document.getElementById('sa')); SA.t = parseFloat(c.paddingTop) || 0; SA.r = parseFloat(c.paddingRight) || 0; SA.b = parseFloat(c.paddingBottom) || 0; SA.l = parseFloat(c.paddingLeft) || 0; }
+/* ===== core/InputManager.js ===== */
+const Input = (() => {
+  const down = new Set(), pressed = new Set(), map = {}, tdown = new Set(), ptrs = new Map();
+  let touchMode = matchMedia('(pointer:coarse)').matches;
+  for (const a in CFG.keys) for (const k of CFG.keys[a]) map[k] = a;
+  addEventListener('keydown', e => {
+    const a = map[e.code]; if (!a) return;
+    e.preventDefault(); if (!down.has(a)) pressed.add(a); down.add(a);
+  });
+  addEventListener('keyup', e => { const a = map[e.code]; if (a) down.delete(a); });
+  addEventListener('blur', () => down.clear());
+  /* controles de toque (principal no celular); o teclado continua funcionando */
+  function layout() { // retrato: esquerda = direção; direita = PULAR grande, com EMPURRAR e CORRER na fileira acima
+    const w = innerWidth, h = innerHeight, s = Math.max(60, Math.min(88, Math.min(w, h) * 0.19)), g = s * 0.18, J = s * 1.3;
+    const ml = Math.max(16, w * 0.04) + SA.l, mr = Math.max(16, w * 0.04) + SA.r, by = Math.max(28, h * 0.05) + SA.b, ty = Math.max(12, h * 0.02) + SA.t;
+    const jy = h - by - J, r2 = jy - s - g, q = s * 0.5;
+    return [
+      { a:'left',   x:ml,            y:h-by-s, w:s, h:s, t:'◀' }, { a:'right', x:ml+s+g, y:h-by-s, w:s, h:s, t:'▶' },
+      { a:'jump',   x:w-mr-J,        y:jy,     w:J, h:J, t:'PULAR' },
+      { a:'sprint', x:w-mr-s,        y:r2,     w:s, h:s, t:'CORRER' }, { a:'push', x:w-mr-2*s-g, y:r2, w:s, h:s, t:'EMPURRAR' },
+      { a:'menu', x:w-mr-q, y:ty, w:q, h:q, t:'☰' }
+    ];
+  }
+  function sync() {
+    const n = new Set(), L = layout();
+    for (const q of ptrs.values()) for (const b of L)
+      if (q.x >= b.x-8 && q.x <= b.x+b.w+8 && q.y >= b.y-8 && q.y <= b.y+b.h+8) n.add(b.a);
+    for (const a of n) if (!tdown.has(a)) pressed.add(a);
+    tdown.clear(); n.forEach(a => tdown.add(a));
+  }
+  addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse') touchMode = true; ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }); sync(); });
+  addEventListener('pointermove', e => { if (ptrs.has(e.pointerId)) { ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }); sync(); } });
+  for (const t of ['pointerup', 'pointercancel']) addEventListener(t, e => { ptrs.delete(e.pointerId); sync(); });
+  addEventListener('contextmenu', e => e.preventDefault());
+  for (const t of ['touchstart', 'touchmove']) addEventListener(t, e => e.preventDefault(), { passive: false }); // sem rolagem/zoom/gestos do navegador
+  for (const t of ['gesturestart', 'gesturechange', 'dblclick']) addEventListener(t, e => e.preventDefault());
+  return { down: a => down.has(a) || tdown.has(a), pressed: a => pressed.has(a), endStep: () => pressed.clear(),
+           layout, isTouch: () => touchMode };
+})();
+
+/* ===== Level: torre em andares (dados). Coordenadas do mundo em px, y cresce para baixo =====
+   Cada andar tem altura FH. Plataforma: [x, altura acima do piso do andar, largura].
+   Parede: [x, de, até, largura] (alturas acima do piso do andar). O último andar contém a meta. */
+const Level = (() => {
+  const W = 900, H = 2400, FH = 300, BASE = 2300, s = [];
+  const add = (x,y,w,h,kind='plat') => s.push({x,y,w,h,kind});
+  const FLOORS = [
+    { plats: [[120,70,160],[340,140,160],[560,210,160],[350,280,160]] },                 // 1: escada de saltos
+    { plats: [[120,50,160],[300,120,220]], walls: [[300,180,300,40],[480,180,300,40]] }, // 2: entrada do poço
+    { walls: [[300,0,300,40],[480,0,300,40]] },                                           // 3: poço de salto na parede
+    { plats: [[520,160,180],[740,230,120]], walls: [[300,0,140,40],[480,0,140,40]] },     // 4: saída do poço
+    { plats: [[520,0,160],[300,70,160],[500,140,160],[260,210,160]], goal: [420,280,200] } // 5: subida final + meta
+  ];
+  add(0,BASE,W,100,'floor'); add(0,0,40,H,'wall'); add(W-40,0,40,H,'wall');
+  FLOORS.forEach((f, i) => {
+    const sy = BASE - i * FH;
+    (f.plats || []).forEach(([x,up,w]) => add(x, sy - up, w, 20));
+    (f.walls || []).forEach(([x,a,b,w]) => add(x, sy - b, w, b - a, 'wall'));
+    if (f.goal) add(f.goal[0], sy - f.goal[1], f.goal[2], 20, 'goal');
+  });
+  const N = FLOORS.length, goal = s.find(r => r.kind === 'goal');
+  return { W, H, FH, BASE, N, solids: s, goal, spawn: { x: 160, y: BASE - CFG.player.h },
+           floorOf: y => Math.min(Level.N, Math.max(1, Math.floor((Level.BASE - y) / Level.FH) + 1)) };
+})();
+const ManualData = { FH: Level.FH, solids: Level.solids, goal: Level.goal, N: Level.N, BASE: Level.BASE, H: Level.H, spawn: Level.spawn };
+Level.set = function (d) { Object.assign(this, { FH: d.FH, solids: d.solids, goal: d.goal, N: d.N, BASE: d.BASE, H: d.H, spawn: d.spawn, hazards: d.hazards || [], structs: d.structs || [], xMin: d.xMin || 0 }); };
+
+/* ===== entities/Player.js + systems/PlayerSystem.js ===== */
+const approach = (v, t, d) => v < t ? Math.min(v + d, t) : Math.max(v - d, t);
+const hit = (x,y,w,h,S=Level.solids) => S.some(s => !s.off && x < s.x+s.w && x+w > s.x && y < s.y+s.h && y+h > s.y);
+
+function newPlayer() {
+  return { x: Level.spawn.x, y: Level.spawn.y, w: CFG.player.w, h: CFG.player.h, vx: 0, vy: 0,
+    face: 1, grounded: false, wallDir: 0, wallSide: 0, wallTime: 0, lastJumpWall: 0,
+    coyote: 0, buffer: 0, lock: 0, sliding: false, hearts: CFG.hearts, invul: 0, hurtT: 0, state: 'active', cause: null };
+}
+
+function stepPlayer(p, dt, inp = Input, S = Level.solids) {
+  const ix = (inp.down('right') ? 1 : 0) - (inp.down('left') ? 1 : 0);
+  if (ix) p.face = ix;
+  // timers (baseados em tempo, não em quadros)
+  p.coyote = p.grounded ? CFG.coyote : p.coyote - dt;
+  p.buffer = inp.pressed('jump') ? CFG.buffer : p.buffer - dt;
+  p.wallTime = p.wallDir ? CFG.wallCoyote : p.wallTime - dt;
+  if (p.wallDir) p.wallSide = p.wallDir;
+  if (p.grounded) p.lastJumpWall = 0;
+  p.lock -= dt;
+
+  // horizontal: andar sempre; sprint enquanto Shift estiver pressionado
+  const max = inp.down('sprint') ? CFG.sprint : CFG.walk, g = p.grounded;
+  let acc;
+  if (!ix) acc = g ? CFG.groundDecel : CFG.airDecel;
+  else if (Math.sign(p.vx) === -ix) acc = g ? CFG.turnGround : CFG.turnAir;
+  else acc = g ? CFG.groundAccel : CFG.airAccel;
+  if (p.lock > 0) acc *= CFG.lockControl;
+  p.vx = approach(p.vx, ix * max, acc * dt);
+
+  // pulo (coyote + buffer) e salto na parede
+  if (p.buffer > 0) {
+    if (p.coyote > 0) { p.vy = -CFG.jump; p.coyote = 0; p.buffer = 0; p.grounded = false; }
+    else if (p.wallTime > 0 && p.wallSide !== p.lastJumpWall) {
+      p.vx = -p.wallSide * CFG.wallJumpX; p.vy = -CFG.wallJumpY; p.face = -p.wallSide;
+      p.lastJumpWall = p.wallSide; p.lock = CFG.wallLock; p.wallTime = 0; p.buffer = 0;
+    }
+  }
+
+  // gravidade; soltar o pulo corta a subida (altura variável)
+  let gr = CFG.gravity;
+  if (p.vy < 0 && !inp.down('jump')) gr *= CFG.cutMult;
+  p.vy = Math.min(p.vy + gr * dt, CFG.maxFall);
+  p.sliding = !p.grounded && p.wallDir !== 0 && p.vy > 0 && ix === p.wallDir;
+  if (p.sliding) p.vy = Math.min(p.vy, CFG.wallSlide);
+
+  // colisão por eixo
+  p.x += p.vx * dt;
+  for (const s of S) if (!s.off && p.x < s.x+s.w && p.x+p.w > s.x && p.y < s.y+s.h && p.y+p.h > s.y) {
+    p.x = p.vx > 0 ? s.x - p.w : s.x + s.w; p.vx = 0;
+  }
+  p.y += p.vy * dt;
+  for (const s of S) if (!s.off && p.x < s.x+s.w && p.x+p.w > s.x && p.y < s.y+s.h && p.y+p.h > s.y) {
+    p.y = p.vy > 0 ? s.y - p.h : s.y + s.h; p.vy = 0;
+  }
+  // sondas de contato
+  p.grounded = p.vy >= 0 && hit(p.x, p.y + 1, p.w, p.h, S);
+  p.wallDir = p.grounded ? 0 : hit(p.x - 1, p.y, p.w, p.h, S) ? -1 : hit(p.x + 1, p.y, p.w, p.h, S) ? 1 : 0;
+}
+
+/* ===== procedural/SeededRandom.js ===== */
+const GEN_VERSION = 4; // v2: obstáculos (lote 1) entram na geração
+function hashStr(str) { let h = 2166136261 >>> 0; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function SeededRandom(seed) {
+  let a = hashStr(String(seed)) || 1;
+  const next = () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  return { next, int: n => Math.floor(next() * n), chance: p => next() < p };
+}
+
+/* ===== procedural/DifficultyManager.js (config das fases) ===== */
+CFG.phases = [
+  { name: 'Aquecimento',  floors: 6,  maxDiff: 1, obst: { spike: .7, max: 2 } },
+  { name: 'Agitação',     floors: 8,  maxDiff: 2, obst: { spike: .75, temp: .4, max: 2, maxPlat: 1 } },
+  { name: 'Caos',         floors: 12, maxDiff: 2, obst: { spike: .7, rspike: .4, zombie: .35, spin: .25, temp: .3, crumble: .5, max: 3, maxPlat: 1 } },
+  { name: 'Desespero',    floors: 16, maxDiff: 3, obst: { spike: .75, rspike: .5, zombie: .45, spin: .4, temp: .35, crumble: .55, max: 4, maxPlat: 2 } },
+  { name: 'Sem Amizade',  floors: 20, maxDiff: 3, obst: { spike: .8, rspike: .55, zombie: .5, spin: .55, temp: .4, crumble: .6, max: 5, maxPlat: 2 } }
+];
+CFG.gen = { maxTries: 10, shift: 20, // passo do deslocamento horizontal dos modelos
+   margin: 42, floorH: 280 }; // altura do andar gerado (degraus ≤ 70px entre andares)
+
+/* ===== procedural/FloorTemplates.js =====
+   plats: [x, altura acima do piso do andar, largura]; walls: [x, de, até, largura].
+   route = índices das plataformas na ordem de travessia (padrão: todas). Primeira = entrada, última = saída. */
+const TEMPLATES = [
+  { id: 'escada',   diff: 1, plats: [[100,60,180],[340,130,160],[580,200,160],[700,270,140]] },
+  { id: 'largo',    diff: 1, plats: [[60,60,300],[420,130,300],[120,200,300],[460,270,300]] },
+  { id: 'estreito', diff: 2, plats: [[200,60,100],[400,130,100],[600,200,100],[420,270,120]] },
+  { id: 'poco',     diff: 3, plats: [[300,60,220],[520,280,180]], walls: [[300,120,260,40],[480,120,260,40]] },
+  { id: 'zig2',    diff: 2, plats: [[320,60,240],[60,130,220],[320,200,220],[600,270,220]] },
+  { id: 'degraus', diff: 2, plats: [[80,60,200],[360,130,200],[640,200,200],[360,270,260]] },
+];
+
+/* ===== procedural/Structures.js — estruturas de 2 andares: tamanho (muda a lava) x dificuldade (muda a lava) + tema ===== */
+CFG.pxPerM = 20; // 1 metro = 20 px
+const SZ = { 'Grande': 1.1, 'Média': 1, 'Pequena': .9 }, DF = { 'Difícil': .92, 'Média': 1, 'Fácil': 1.08 }, lavaMult = s => SZ[s.size] * DF[s.diff];
+const STRUCTS = [ // extra: [tipo, chance, largura mínima da plataforma]; obst: pesos que sobrescrevem os da fase; tpls: modelos preferidos
+  { id: 'cemiterio', name: 'Cemitério', size: 'Média', diff: 'Fácil', minPhase: 0, tpls: ['escada', 'degraus'], obst: { zombie: .45, spike: .3, rspike: 0, spin: 0 }, extra: [['ghost', .8, 120]] },
+  { id: 'floresta', name: 'Floresta dos Macacos', size: 'Média', diff: 'Média', minPhase: 0, tpls: ['zig2', 'largo'], obst: { zombie: 0, spike: .3, rspike: 0, spin: 0 }, extra: [['monkey', .9, 140]] },
+  { id: 'corredor', name: 'Corredor Vertical', size: 'Grande', diff: 'Média', minPhase: 1, tpls: ['poco', 'estreito'], obst: { zombie: 0, spike: 0, rspike: .8, spin: 0, temp: 0 }, extra: [] },
+  { id: 'oceano', name: 'Inundação Oceânica', size: 'Grande', diff: 'Difícil', minPhase: 2, tpls: ['largo', 'zig2'], obst: { zombie: 0, spike: 0, rspike: 0, spin: 0 }, extra: [['shark', .8, 150], ['eel', .8, 200]] },
+  { id: 'fabrica', name: 'Fábrica do Mal', size: 'Média', diff: 'Difícil', minPhase: 2, tpls: ['poco', 'estreito', 'degraus'], obst: { zombie: 0, spike: .3, rspike: .3, spin: .3 }, extra: [['saw', .8, 260], ['piston', .8, 140]] }
+];
+const STY = { cemiterio: { plat: '#8a8f9c', bg: 'rgba(120,130,160,.14)' }, floresta: { plat: '#8b5a2b', bg: 'rgba(60,140,70,.14)' }, corredor: { plat: '#6a6fd8', bg: 'rgba(110,110,220,.12)' },
+  oceano: { plat: '#2fae6b', bg: 'rgba(30,111,168,.24)' }, fabrica: { plat: '#7a828c', bg: 'rgba(200,120,60,.14)' } };
+const lavaTier = m => m < 7 ? { t: 'Resenha Quente!', c: '#ff4d3a' } : m < 14 ? { t: 'Resenha Esquentando', c: '#ffb02e' } : m < 28 ? { t: 'Resenha Morna', c: '#ffe08a' } : { t: 'Resenha Fria', c: '#9fe3ff' };
+/* obstáculos temáticos (comportamento por tempo de jogo, sem estado: determinísticos) */
+function themed(c, rng, st, haz, pi) {
+  for (const [type, pr, minW] of st.extra || []) {
+    if (!rng.chance(Math.min(.95, pr * (.55 + .15 * pi)))) continue;
+    const free = c.route.slice(1).filter(r => r.kind === 'plat' && r.w >= minW && !haz.some(h => h.x < r.x + r.w && h.x + h.w > r.x && Math.abs(h.y + h.h - r.y) < 4));
+    if (!free.length) continue;
+    const r = free[rng.int(free.length)], cx = r.x + r.w / 2, f0 = rng.next(); let h;
+    if (type === 'ghost' || type === 'shark') { const g = type === 'ghost', A = g ? 60 + f0 * 30 : 90 + f0 * 30, B = g ? 26 : 14, cy = r.y - (g ? 64 : 56);
+      h = { type, cx, cy, A, B, om: g ? .8 + f0 * .5 : .6 + f0 * .3, ph: f0 * 6.28, hw: g ? 12 : 24, hh: g ? 12 : 11, x: cx - A - 26, y: cy - B - 14, w: 2 * A + 52, h: 2 * B + 28 }; }
+    else if (type === 'eel') h = { type, cx, cy: r.y - 14, R: 64, safe: 1.6, warn: .7, on: .7, ret: .3, ph: f0 * 3.3, x: cx - 64, y: r.y - 78, w: 128, h: 128 };
+    else if (type === 'monkey') { const L = cx < Level.W / 2, mx = L ? r.x + 8 : r.x + r.w - 32, my = r.y - 26;
+      h = { type, mx, my, T: 3 + f0 * 1.2, fl: 2.2, ph: f0 * 4, bvx: (L ? 1 : -1) * (120 + rng.next() * 100), bvy: -420, x: mx - 320, y: my - 140, w: 660, h: 700 }; }
+    else if (type === 'saw') { const x0 = r.x + 20, x1 = r.x + r.w - 48; h = { type, x0, x1, x: x0, y: r.y - 28, w: x1 - x0 + 28, h: 28, speed: 55 + f0 * 30, off: rng.next() }; }
+    else h = { type: 'piston', x: Math.round(cx - 20), y: r.y - 80, w: 40, h: 80, safe: 1.2, warn: .5, on: .8, ret: .4, ph: f0 * 2.9 };
+    haz.push(h);
+  }
+}
+
+/* ===== core/Sprites.js — carrega PNGs da pasta assets/images/. Arquivo ausente = o jogo usa a forma antiga (nunca quebra) =====
+   Regras: cada quadro = 32x32 px. Uma imagem pode ter vários quadros LADO A LADO (tira horizontal): o jogo conta sozinho (largura / 32).
+   Para ligar uma arte nova: salve o PNG com o nome certo na pasta certa. Não precisa mexer no código. */
+const SPR = {
+  base: 'assets/images/', frame: 32, fps: 8, img: {}, pat: {},
+  dim: { /* tamanho de desenho no mundo (px), se quiser diferente de 32x32. Ex.: 'enemies/shark': [48, 48] */ },
+  files: ['player/idle', 'player/walk', 'player/run', 'player/jump', 'player/fall', 'player/wall', 'player/hurt', 'player/dead', 'player/push',
+    'enemies/monkey', 'enemies/banana', 'enemies/zombie', 'enemies/ghost', 'enemies/shark', 'enemies/eel', 'obstacles/saw', 'tiles/plat', 'tiles/wall', 'tiles/floor', 'tiles/goal'],
+  load() { for (const id of [...STRUCTS, ...(typeof DRAWN === 'undefined' ? [] : DRAWN)].map(s => s.id)) this.files.push('tiles/' + id + '_plat', 'tiles/' + id + '_wall'); // estrutura nova ganha texturas só pelo nome (id)
+    for (const k of this.files) { const im = new Image(); im.onload = () => { this.img[k] = im; }; im.src = this.base + k + '.png'; } },
+  has(k) { return !!this.img[k]; },
+  at(ctx, k, x, y, flip = false, anchor = 'c', rot = 0, frame = null) { // anchor: 'c' centro em (x,y) · 'b' base centralizada em (x,y)
+    const im = this.img[k]; if (!im) return false;
+    const [w, h] = this.dim[k] || [32, 32], n = Math.max(1, Math.floor(im.width / this.frame)), f = frame != null ? Math.min(frame, n - 1) : Math.floor(performance.now() / 1000 * this.fps) % n;
+    ctx.imageSmoothingEnabled = false; ctx.save(); ctx.translate(x, anchor === 'b' ? y - h / 2 : y); if (rot) ctx.rotate(rot); if (flip) ctx.scale(-1, 1);
+    ctx.drawImage(im, f * this.frame, 0, this.frame, im.height, -w / 2, -h / 2, w, h); ctx.restore(); return true; },
+  player(ctx, p) { // escolhe o quadro pelo estado do jogador; se faltar a arte do estado, cai para a mais parecida
+    const mv = Math.abs(p.vx) > 8, want = p.state === 'dead' ? ['dead', 'hurt'] : p.hurtT > 0 ? ['hurt'] : (p.pushT || 0) > 0 ? ['push'] : p.sliding ? ['wall'] : !p.grounded ? [p.vy < 0 ? 'jump' : 'fall'] : mv ? [Math.abs(p.vx) > CFG.walk + 20 ? 'run' : 'walk', 'walk'] : [];
+    for (const s of [...want, 'idle']) if (this.has('player/' + s)) return this.at(ctx, 'player/' + s, p.x + p.w / 2, p.y + p.h, p.face < 0, 'b');
+    return false; },
+  tile(ctx, s, sh) { // textura repetida em plataformas/paredes/chão
+    const ks = s.kind === 'wall' ? ['tiles/' + s.sk + '_wall', 'tiles/wall'] : s.kind === 'floor' ? ['tiles/floor'] : s.kind === 'goal' ? ['tiles/goal', 'tiles/plat'] : ['tiles/' + s.sk + '_plat', 'tiles/plat'];
+    const k = ks.find(q => this.img[q]); if (!k) return false;
+    if (!this.pat[k]) { const im = this.img[k], c = document.createElement('canvas'); c.width = c.height = this.frame; c.getContext('2d').drawImage(im, 0, 0, this.frame, im.height, 0, 0, this.frame, this.frame); this.pat[k] = ctx.createPattern(c, 'repeat'); }
+    ctx.imageSmoothingEnabled = false; ctx.save(); ctx.translate(s.x + sh, s.y); ctx.fillStyle = this.pat[k]; ctx.fillRect(0, 0, s.w, s.h); ctx.restore(); return true; }
+};
+SPR.load();
+/* ===== entities/Hazard.js + systems/ObstacleSystem.js (lote 1: espinhos fixos, retráteis, pisos temporários) ===== */
+CFG.obst = { spike: { w: 36, h: 14 }, rspike: { w: 40, h: 16, safe: 1.4, warn: 0.6, on: 1.0, ret: 0.3 }, temp: { warn: 1.0, gone: 2.5, back: 0.4 } };
+Object.assign(CFG.obst, { spin: { R: 56, sp: 1.0 }, zombie: { speed: 42 }, crumble: { warn: 0.8 } });
+Level.hazards = [];
+const Obstacles = {
+  state(h, t) { if (['spike', 'zombie', 'spin', 'saw', 'ghost', 'shark', 'monkey'].includes(h.type)) return 'on'; const c = (t + h.ph) % (h.safe + h.warn + h.on + h.ret);
+    return c < h.safe ? 'safe' : c < h.safe + h.warn ? 'warn' : c < h.safe + h.warn + h.on ? 'on' : 'ret'; },
+  zpos(h, t) { const len = h.x1 - h.x0, u = (t * h.speed + h.off * 2 * len) % (2 * len); return { x: h.x0 + (u < len ? u : 2 * len - u), dir: u < len ? 1 : -1 }; }, // patrulha por tempo de jogo
+  zrect(h, t) { const z = this.zpos(h, t); return { x: z.x + 3, y: h.y + 3, w: 18, h: h.h - 3 }; },
+  fpos(h, t) { return { x: h.cx + h.A * Math.sin(h.om * t + h.ph), y: h.cy + h.B * Math.sin(2 * h.om * t + h.ph), d: Math.cos(h.om * t + h.ph) > 0 ? 1 : -1 }; }, // fantasma/tubarão: trajetória por tempo
+  banana(h, u) { return { x: h.mx + 12 + h.bvx * u, y: h.my + h.bvy * u + 300 * u * u }; }, // parábola da banana
+  hits(h, p, t) {
+    if (h.type === 'ghost' || h.type === 'shark') { const f = this.fpos(h, t); return p.x < f.x + h.hw && p.x + p.w > f.x - h.hw && p.y < f.y + h.hh && p.y + p.h > f.y - h.hh; }
+    if (h.type === 'eel') { if (this.state(h, t) !== 'on') return false; const qx = Math.max(p.x, Math.min(h.cx, p.x + p.w)), qy = Math.max(p.y, Math.min(h.cy, p.y + p.h)); return (qx - h.cx) ** 2 + (qy - h.cy) ** 2 < h.R * h.R; }
+    if (h.type === 'monkey') { const u = (t + h.ph) % h.T; if (u >= h.fl) return false; const b = this.banana(h, u); return p.x < b.x + 7 && p.x + p.w > b.x - 7 && p.y < b.y + 7 && p.y + p.h > b.y - 7; }
+    if (h.type === 'spin') { const a = h.a0 + h.sp * t; // barra giratória: 8 pontos ao longo da barra
+      for (let k = 1; k <= 8; k++) { const x = h.cx + Math.cos(a) * h.R * k / 8, y = h.cy + Math.sin(a) * h.R * k / 8; if (x > p.x - 3 && x < p.x + p.w + 3 && y > p.y - 3 && y < p.y + p.h + 3) return true; } return false; }
+    const b = (h.type === 'zombie' || h.type === 'saw') ? this.zrect(h, t) : this.hurt(h, this.state(h, t)); return !!b && p.x < b.x + b.w && p.x + p.w > b.x && p.y < b.y + b.h && p.y + p.h > b.y; },
+  hurt(h, st) { if (h.type === 'piston') return st === 'on' ? { x: h.x, y: h.y + h.h - 18, w: h.w, h: 18 } : null; return st === 'on' ? { x: h.x + 3, y: h.y + 3, w: h.w - 6, h: h.h - 3 } : null; }, // hitbox de dano menor que o desenho
+  touching: p => Level.hazards.some(h => p.x < h.x + h.w + 6 && p.x + p.w > h.x - 6 && p.y < h.y + h.h && p.y + p.h > h.y - 4),
+  reset() { for (const s of Level.solids) if (s.temp) { s.temp.state = 'stable'; s.temp.t = 0; s.off = false; } },
+  update(p, dt) {
+    const C = CFG.obst.temp;
+    for (const s of Level.solids) if (s.temp) { const T = s.temp, ov = p.x < s.x + s.w && p.x + p.w > s.x; T.t -= dt;
+      if (T.state === 'stable') { if (p.grounded && Math.abs(p.y + p.h - s.y) < 1 && ov) { T.state = 'warn'; T.t = T.mode === 'crumble' ? CFG.obst.crumble.warn : C.warn; } }          // estável -> aviso (só começa com contato)
+      else if (T.state === 'warn' && T.t <= 0) { T.state = 'gone'; T.t = C.gone; s.off = true; }                                     // aviso -> desaparecido (não sólido)
+      else if (T.state === 'gone' && T.t <= 0 && T.mode !== 'crumble' && !(ov && p.y < s.y + s.h && p.y + p.h > s.y)) { T.state = 'back'; T.t = C.back; s.off = false; } // reaparecendo
+      else if (T.state === 'back' && T.t <= 0) T.state = 'stable'; }
+    if (p.grounded) { const u = under(p, Level.solids); if (u && !u.temp && !this.touching(p)) p.safe = { x: p.x, y: p.y }; }
+    if (p.invul > 0 || p.state !== 'active') return; // durante a invulnerabilidade os obstáculos continuam funcionando, mas não causam dano
+    for (const h of Level.hazards) if (this.hits(h, p, Game.t)) { this.onHit(p, h); break; }
+  },
+  onHit(p, h) { const t = Game.t; Survival.hurt(p, h.type === 'spin' || h.type === 'eel' ? h.cx : h.type === 'ghost' || h.type === 'shark' ? this.fpos(h, t).x : h.type === 'zombie' || h.type === 'saw' ? this.zpos(h, t).x + 12 : h.type === 'monkey' ? this.banana(h, (t + h.ph) % h.T).x : h.x + h.w / 2); }
+};
+/* o gerador só mantém um obstáculo se a torre continuar validada com ele tratado como bloco sólido (pior caso) */
+function decorate(c, rng, ph, S, blk, haz, prev, fi, N, opt) {
+  const o = ph.obst || {}, C = CFG.obst, pi = ph.idx != null ? ph.idx : CFG.phases.indexOf(ph), n = c.route.length - 1, ramp = .5 + .5 * (N > 1 ? fi / (N - 1) : 1), used = new Set(), idx = [...Array(n).keys()];
+  for (let k = n - 1; k > 0; k--) { const j = Math.floor(rng.next() * (k + 1)); [idx[k], idx[j]] = [idx[j], idx[k]]; }
+  let budget = o.max || 1; // obstáculos de perigo por andar; cresce com a fase e sobe dentro da fase
+  for (const j of idx) { if (budget <= 0) break; const r = c.route[j];
+    for (const type of ['spin', 'zombie', 'rspike', 'spike']) { if (used.has(r) || !rng.chance((o[type] || 0) * ramp)) continue;
+      if (type === 'spin' && r.w < 260 || type === 'zombie' && r.w < 300 || (type === 'spike' || type === 'rspike') && r.w < 90) continue; // espinho fixo cabe em qualquer plataforma onde sobre espaço (o validador garante a rota com ele como bloco sólido)
+      let h;
+      if (type === 'spin') { const R = C.spin.R; h = { type, cx: r.x + r.w / 2, cy: r.y - 76, R, a0: rng.next() * 6.28, sp: (rng.chance(.5) ? 1 : -1) * Math.min(1.4, C.spin.sp + .08 * pi), x: r.x + r.w / 2 - R, y: r.y - 76 - R, w: 2 * R, h: 76 + R }; }
+      else if (type === 'zombie') { const x0 = r.x + 50, x1 = r.x + r.w - 74; h = { type, x0, x1, x: x0, y: r.y - 28, w: x1 - x0 + 24, h: 28, speed: C.zombie.speed + rng.next() * 20, off: rng.next() }; }
+      else { const d = C[type], w = type === 'spike' && pi >= 3 ? d.w * 2 : d.w; h = { type, x: Math.round(r.x + rng.next() * (r.w - w)), y: r.y - d.h, w, h: d.h };
+        if (type === 'rspike') Object.assign(h, { safe: d.safe, warn: d.warn, on: d.on, ret: d.ret, ph: rng.next() * (d.safe + d.warn + d.on + d.ret) });
+        const bl = { x: h.x, y: h.y, w: h.w, h: h.h, kind: 'wall' }; // pior caso: bloco sólido; só fica se a rota continuar válida
+        if (!validatePairs(prev, c.route, S.concat(blk, [bl])).ok) continue; blk.push(bl); }
+      haz.push(h); used.add(r); budget--; break; } }
+  let pk = o.maxPlat || 1; // pisos temporários (aviso 1,0 s) e que desmoronam (aviso 0,8 s): ambos > corrida máxima validada (0,4 s)
+  for (const j of idx) { if (pk <= 0) break; const r = c.route[j]; if (used.has(r) || r.kind !== 'plat') continue;
+    if (rng.chance((o.temp || 0) * ramp)) { r.kind = 'temp'; r.temp = { state: 'stable', t: 0 }; pk--; }
+  }
+  /* plataforma que desmorona = ATALHO OPCIONAL, nunca parte da rota obrigatória: fica fora de `S` (solids da validação) */
+  if (rng.chance((o.crumble || 0) * ramp * 1.6)) { const chain = [prev, ...c.route], hz = r => haz.some(h => h.x < r.x + r.w && h.x + h.w > r.x && Math.abs(h.y + h.h - r.y) < 2);
+    const js = [...Array(Math.max(0, chain.length - 2)).keys()].sort((a, b) => (hz(chain[b + 1]) ? 1 : 0) - (hz(chain[a + 1]) ? 1 : 0) || rng.next() - .5);
+    let tries = 0; for (const j of js) { const a = chain[j], b = chain[j + 1], d = chain[j + 2]; if (tries >= 8) break;
+      for (const dx of [-220, 220, -150, 150, -90, 90, 0]) { tries++; const w = 110, e = { x: Math.round((a.x + a.w / 2 + d.x + d.w / 2) / 2 - w / 2 + dx), y: Math.round((a.y + d.y) / 2), w, h: 20, kind: 'temp', temp: { state: 'stable', t: 0, mode: 'crumble' } };
+        if (e.x < CFG.gen.margin || e.x + e.w > Level.W - CFG.gen.margin) continue;
+        const all = S.concat(blk, opt), clash = all.some(q => e.x - 8 < q.x + q.w && e.x + e.w + 8 > q.x && e.y - 40 < q.y + q.h && e.y + e.h + 8 > q.y) || haz.some(h => e.x < h.x + h.w && e.x + e.w > h.x && e.y - 40 < h.y + h.h && e.y + e.h > h.y);
+        if (clash) continue; const test = S.concat(blk, opt), as = test.concat([e]);
+        if (canReach(a, e, as) && canReach(e, d, as) && validatePairs(prev, c.route, as).ok) { opt.push(e); tries = 99; break; } }
+      if (tries >= 99) break; } }
+  /* (pisos temporários que voltam continuam na rota: reaparecem) */
+}
+/* ===== systems/HealthSystem.js + LavaSystem.js (Etapa 5): corações, invulnerabilidade, lava, eliminação ===== */
+[{ delay: 4, speed: 24, accel: .5, max: 36 }, { delay: 3, speed: 30, accel: .7, max: 46 }, { delay: 3, speed: 38, accel: .9, max: 58 },
+ { delay: 2, speed: 48, accel: 1.2, max: 72 }, { delay: 2, speed: 60, accel: 1.6, max: 90 }].forEach((l, i) => CFG.phases[i].lava = l); // px/s, px/s² — balanceável por fase
+CFG.lavaManual = { delay: 5, speed: 10, accel: 0, max: 10 };
+const Lava = { y: 0, v: 0, t: 0, mult: 1,
+  cfg() { return (App.tower && CFG.phases[App.phase].lava) || CFG.lavaManual; },
+  reset() { this.y = Level.BASE + 100; this.t = 0; this.v = this.cfg().speed; },       // começa abaixo da área jogável
+  update(dt) { const c = this.cfg(); if (Game.entered === false) return; this.t += dt; if (this.t < c.delay) return; this.v = Math.min(c.max, this.v + c.accel * dt); this.y -= this.v * this.mult * dt; } }; // por tempo de jogo, não por quadro
+const Survival = {
+  hurt(p, sx) { if (p.state !== 'active' || p.invul > 0) return false;   // dano comum: ignorado se invulnerável ou eliminado
+    p.hearts--; Game.hits++; p.hurtT = .35;
+    if (p.hearts <= 0) { this.eliminate(p, 'dano'); return true; }
+    const dx = sx == null ? 0 : p.x + p.w / 2 - sx, dir = Math.abs(dx) < 6 ? -p.face : Math.sign(dx), K = CFG.knock; // knockback: empurra para longe do perigo
+    p.vx = dir * K.vx; p.vy = K.vy; p.lock = K.lock; p.grounded = false; p.invul = CFG.invul; return true; },                // 3 s fixos, sem reiniciar a cada contato
+  eliminate(p, cause) { if (p.state !== 'active') return; p.state = 'dead'; p.cause = cause; p.vx = 0; p.invul = 0; },
+  update(p, dt) { if (p.state !== 'active') return;
+    if (p.invul > 0) { p.invul -= dt; if (p.invul < 1e-9) p.invul = 0; }
+    p.hurtT = Math.max(0, p.hurtT - dt);
+    if (p.y + p.h > Lava.y) this.eliminate(p, 'lava'); },            // lava: morte direta, ignora corações e invulnerabilidade
+  selfTest() { const R = [], ok = (n, c) => R.push([n, !!c]), sv = [Game.hits, Lava.y, Lava.t, Lava.v], mk = () => Object.assign(newPlayer(), { x: 100, y: 100 }), H = CFG.hearts;
+    const wait = p => { let n = 0; while (p.invul > 0 && n < 2000) { Survival.update(p, CFG.step); n++; } return n; };
+    Lava.y = 1e6; let p = mk();
+    ok(`começa com ${H} corações, ativo`, p.hearts === H && p.state === 'active');
+    ok('dano válido tira 1 coração, liga a invulnerabilidade de 3 s e dá knockback', Survival.hurt(p, p.x + 40) && p.hearts === H - 1 && p.invul === 3 && p.vx < 0 && p.vy < 0);
+    ok('contato repetido durante a invulnerabilidade não tira coração', !Survival.hurt(p, p.x) && p.hearts === H - 1 && p.invul === 3);
+    const n = wait(p); ok(`invulnerabilidade dura 3,00 s (${n} passos de ${(CFG.step * 1000).toFixed(2)} ms = ${(n * CFG.step).toFixed(3)} s)`, Math.abs(n * CFG.step - 3) < .01);
+    let hits = 1; while (p.state === 'active' && hits < 20) { Survival.hurt(p, p.x - 30); hits++; wait(p); }
+    ok(`só o ${H}º dano válido elimina (levou ${hits})`, hits === H && p.hearts === 0 && p.state === 'dead' && p.cause === 'dano');
+    ok('eliminado não sofre dano', !Survival.hurt(p));
+    Combat.update(p, .01, { pressed: () => true, down: () => false }); ok('eliminado não usa EMPURRAR', !p.pushCd);
+    p = mk(); Survival.hurt(p); Lava.y = p.y + p.h - 1; Survival.update(p, CFG.step);
+    ok('lava mata DURANTE a invulnerabilidade', p.state === 'dead' && p.cause === 'lava' && p.invul === 0);
+    p = mk(); Lava.y = p.y + p.h - 1; Survival.update(p, CFG.step); ok(`lava mata com os ${H} corações cheios`, p.state === 'dead' && p.cause === 'lava' && p.hearts === H);
+    p = mk(); Lava.y = p.y + p.h + 3; Survival.update(p, CFG.step); ok('lava abaixo dos pés não mata', p.state === 'active');
+    const run = st => { Lava.reset(); for (let i = 0; i < 12 / st; i++) Lava.update(st); return Lava.y; }, a = run(1 / 120), b = run(1 / 30);
+    ok(`lava independe da taxa de quadros (diferença ${Math.abs(a - b).toFixed(2)} px após 12 s)`, Math.abs(a - b) < 1);
+    [Game.hits, Lava.y, Lava.t, Lava.v] = sv; return R; } };
+/* ===== systems/CombatSystem.js (parcial): botão/tecla EMPURRAR, animação e cooldown de 10 s. Alvos e paralisia: Etapa 6 ===== */
+CFG.push = { range: 56, cooldown: 10, anim: 0.25, deny: 0.3, paralyze: 3 };
+const Combat = { update(p, dt, inp = Input) {
+  p.pushCd = Math.max(0, (p.pushCd || 0) - dt); p.pushT = Math.max(0, (p.pushT || 0) - dt); p.pushDeny = Math.max(0, (p.pushDeny || 0) - dt);
+  if (!inp.pressed('push') || Game.done || p.state !== 'active') return;
+  if (p.pushCd > 0) p.pushDeny = CFG.push.deny; else { p.pushCd = CFG.push.cooldown; p.pushT = CFG.push.anim; p.pushFace = p.face; } } };
+const FALLBACK_ID = 'largo';
+
+function dxOptions(tpl, mirror) { // deslocamentos horizontais que mantêm o modelo dentro dos limites
+  const xs = [...tpl.plats, ...(tpl.walls || [])].map(r => mirror ? [Level.W - r[0] - (r.length === 4 ? r[3] : r[2]), 0] : [r[0], 0]);
+  let lo = 1e9, hi = -1e9;
+  for (const r of [...tpl.plats, ...(tpl.walls || [])]) { const w = r.length === 4 ? r[3] : r[2], x = mirror ? Level.W - r[0] - w : r[0]; lo = Math.min(lo, x); hi = Math.max(hi, x + w); }
+  const m = CFG.gen.margin, out = [];
+  for (let d = -Level.W; d <= Level.W; d += CFG.gen.shift) if (lo + d >= m && hi + d <= Level.W - m) out.push(d);
+  return out.sort((p, q) => Math.abs(p) - Math.abs(q) || p - q);
+}
+function alignedDx(tpl, mirror, prev) { // deslocamentos que põem a entrada AO LADO da saída anterior (sem teto em cima)
+  const [x, , w] = tpl.plats[(tpl.route || [0])[0]], ex = mirror ? Level.W - x - w : x, m = CFG.gen.margin, out = [];
+  let lo = 1e9, hi = -1e9;
+  for (const r of [...tpl.plats, ...(tpl.walls || [])]) { const rw = r.length === 4 ? r[3] : r[2], rx = mirror ? Level.W - r[0] - rw : r[0]; lo = Math.min(lo, rx); hi = Math.max(hi, rx + rw); }
+  for (const d of [prev.x - 40 - (ex + w), prev.x + prev.w + 40 - ex]) { const r = Math.round(d / 10) * 10; if (lo + r >= m && hi + r <= Level.W - m) out.push(r); }
+  return out;
+}
+function instantiate(tpl, sy, mirror, dx) {
+  const mx = (x, w) => (mirror ? Level.W - x - w : x) + dx, m = CFG.gen.margin, out = [], rects = [];
+  for (const [x, up, w] of tpl.plats) { const r = { x: mx(x, w), y: sy - up, w, h: 20, kind: 'plat' }; rects.push(r); out.push(r); }
+  for (const [x, a, b, w] of (tpl.walls || [])) out.push({ x: mx(x, w), y: sy - b, w, h: b - a, kind: 'wall' });
+  if (out.some(r => r.x < m || r.x + r.w > Level.W - m)) return null;
+  return { id: tpl.id, mirror, dx, solids: out, route: (tpl.route || rects.map((_, i) => i)).map(i => rects[i]) };
+}
+
+/* ===== procedural/PathValidator.js — valida transições com a FÍSICA REAL (stepPlayer) ===== */
+const under = (p, S) => S.find(s => s.kind !== 'wall' && !s.off && Math.abs(p.y + p.h - s.y) < 0.6 && p.x < s.x + s.w && p.x + p.w > s.x);
+function simMacro(a, b, S, x0, m) {
+  const p = newPlayer(); p.x = x0; p.y = a.y - p.h; p.vx = p.vy = 0; p.grounded = true;
+  if (hit(p.x, p.y, p.w, p.h, S)) return false;
+  const f = {}, pr = {}, inp = { down: k => !!f[k], pressed: k => !!pr[k] }, dt = CFG.step;
+  let jt = -1, tap = -9, air = m.dir;
+  for (let i = 0; i < 720; i++) {
+    const t = i * dt; pr.jump = false;
+    if (t < m.run) { f.left = m.dir < 0; f.right = m.dir > 0; f.sprint = !!m.sprint; }
+    else {
+      if (jt < 0) { jt = t; pr.jump = true; }
+      f.sprint = !!m.sprint; f.left = air < 0; f.right = air > 0;
+      if (m.wall && !p.grounded && p.wallDir && p.wallSide !== p.lastJumpWall && t - tap > 0.2 && t - jt > 0.1) { pr.jump = true; tap = t; air = -p.wallDir; }
+    }
+    f.jump = jt >= 0 && (t - jt < m.hold || t - tap <= 0.3);
+    stepPlayer(p, dt, inp, S);
+    if (jt >= 0 && t - jt > 0.15 && p.grounded) { const ok = under(p, S) === b && p.x >= b.x && p.x + p.w <= b.x + b.w; if (ok) m.time = t; return ok; } // pousa INTEIRO na plataforma alvo
+    if (p.y > a.y + 700) return false;
+  }
+  return false;
+}
+function canReachRaw(a, b, S0) {
+  const pw = CFG.player.w, S = S0.filter(s => Math.abs(s.y - a.y) < 800);
+  const lo = Math.max(a.x + 2, CFG.gen.margin), hi = Math.min(a.x + a.w - pw - 2, Level.W - CFG.gen.margin - pw);
+  const cl = x => Math.max(lo, Math.min(hi, x)), tx = cl(b.x + b.w / 2 - pw / 2);
+  const xs = [...new Set([tx, lo, hi, (lo + hi) / 2, ...[-130, -70, -30].map(d => cl(b.x + d)), ...[10, 50, 110].map(d => cl(b.x + b.w + d))])], dirs = b.x + b.w / 2 >= a.x + a.w / 2 ? [1, -1] : [-1, 1];
+  for (const wall of [0, 1]) for (const sprint of [0, 1]) for (const run of [0, .15, .4]) for (const hold of [.1, .2, .3])
+    for (const dir of dirs) for (const x0 of xs) { const m = { dir, sprint, run, hold, wall };
+      if (simMacro(a, b, S, x0, m) && [-12, 12].every(d => simMacro(a, b, S, cl(x0 + d), m)) && [-.04, .04].every(d => simMacro(a, b, S, x0, { ...m, hold: hold + d }))) return true; }
+  return false;
+}
+/* humano: o salto só vale se passar com 92% da força/velocidade E com erro de ±12 px de decolagem e ±0,04 s no botão */
+CFG.humanNerf = 0.92;
+function canReach(a, b, S0) { const j = CFG.jump, w = CFG.walk, sp = CFG.sprint, k = CFG.humanNerf; CFG.jump = j * k; CFG.walk = w * k; CFG.sprint = sp * k;
+  try { return canReachRaw(a, b, S0); } finally { CFG.jump = j; CFG.walk = w; CFG.sprint = sp; } }
+function validatePairs(prev, route, S) {
+  const chain = [prev, ...route];
+  for (let i = 0; i < chain.length - 1; i++) if (!canReach(chain[i], chain[i + 1], S)) return { ok: false, why: `plataforma ${i} -> ${i + 1} inalcançável` };
+  return { ok: true };
+}
+
+/* ===== procedural/TowerGenerator.js ===== */
+function pickTemplate(pool, rng, ramp, pref = []) {
+  const w = pool.map(t => (1 / (1 + Math.abs(t.diff - ramp) * 2)) * (pref.includes(t.id) ? 3 : 1));
+  let r = rng.next() * w.reduce((x, y) => x + y, 0);
+  for (let i = 0; i < pool.length; i++) { r -= w[i]; if (r <= 0) return pool[i]; }
+  return pool[pool.length - 1];
+}
+function* genSteps(seed, phaseIdx) {
+  const t0 = performance.now(), ph = CFG.phases[phaseIdx], N = ph.floors, FH = CFG.gen.floorH, BASE = N * FH + 200;
+  const rng = SeededRandom(`${GEN_VERSION}|${phaseIdx}|${seed}`), orng = SeededRandom(`${GEN_VERSION}|obs|${phaseIdx}|${seed}`), blk = [], haz = [], opt = []; // opt = atalhos opcionais (desmoronam), fora da validação obrigatória
+  const solids = [{ x: 0, y: BASE, w: Level.W, h: 100, kind: 'floor' }, { x: 0, y: 0, w: 40, h: BASE - 96, kind: 'wall' }, { x: 860, y: 0, w: 40, h: BASE + 100, kind: 'wall' }];
+  const stats = { attempts: 0, fails: 0, rejected: 0, fallbacks: 0, ms: 0 }, log = [], floors = [];
+  let prev = solids[0], lastId = null; const srng = SeededRandom(`${GEN_VERSION}|str|${phaseIdx}|${seed}`), structs = []; let lastS = null, st = null;
+  for (let i = 0; i < N; i++) {
+    const sy = BASE - i * FH, ramp = 1 + (ph.maxDiff - 1) * (N > 1 ? i / (N - 1) : 0);
+    if (i % 2 === 0) { let cand = STRUCTS.filter(s => s.minPhase <= phaseIdx && s.id !== lastS); if (!cand.length) cand = STRUCTS.filter(s => s.minPhase <= phaseIdx);
+      st = cand[srng.int(cand.length)]; lastS = st.id; structs.push({ id: st.id, name: st.name, size: st.size, diff: st.diff, mult: lavaMult(st) }); }
+    let pool = TEMPLATES.filter(t => t.ok && (t.diff <= Math.ceil(ramp - 1e-6) || (phaseIdx >= 1 && st.tpls.includes(t.id) && t.diff <= 3)) && t.id !== lastId);
+    if (!pool.length) pool = TEMPLATES.filter(t => t.id === FALLBACK_ID);
+    let chosen = null;
+    for (let k = 0; k < CFG.gen.maxTries && !chosen; k++) {
+      stats.attempts++;
+      const tpl = pickTemplate(pool, rng, ramp, st.tpls), mirror = rng.chance(.5), dxs = dxOptions(tpl, mirror), al = alignedDx(tpl, mirror, prev);
+      const useAl = al.length && rng.chance(.4), list = useAl ? al : dxs, dx = list.length ? list[rng.int(list.length)] : null;
+      const c = dx !== null ? instantiate(tpl, sy, mirror, dx) : null;
+      if (!c) { stats.rejected++; log.push({ floor: i + 1, tpl: tpl.id, why: 'fora dos limites' }); continue; }
+      const v = validatePairs(prev, c.route, solids.concat(blk, c.solids));
+      if (v.ok) chosen = c; else { stats.fails++; stats.rejected++; log.push({ floor: i + 1, tpl: tpl.id, why: v.why }); }
+    }
+    if (!chosen) { // fallback: busca determinística entre modelos pré-validados (sem aleatoriedade)
+      stats.fallbacks++;
+      const order = [...TEMPLATES.filter(t => t.ok && t.id !== FALLBACK_ID && t.diff <= Math.ceil(ramp - 1e-6)), TEMPLATES.find(t => t.id === FALLBACK_ID)];
+      search: for (const tpl of order) for (const mirror of [false, true]) for (const d of [...alignedDx(tpl, mirror, prev), ...dxOptions(tpl, mirror)]) {
+        const c = instantiate(tpl, sy, mirror, d);
+        if (validatePairs(prev, c.route, solids.concat(blk, c.solids)).ok) { chosen = c; log.push({ floor: i + 1, tpl: tpl.id, why: 'FALLBACK: busca exaustiva' }); break search; }
+      }
+      if (!chosen) { chosen = instantiate(TEMPLATES.find(t => t.id === FALLBACK_ID), sy, false, 0); log.push({ floor: i + 1, tpl: FALLBACK_ID, why: 'FALLBACK FALHOU (torre inválida)' }); }
+    }
+    chosen.solids.forEach(s => { if (s.kind === 'plat') s.sk = st.id; }); solids.push(...chosen.solids); const ph2 = { ...ph, idx: phaseIdx, obst: { ...ph.obst, ...st.obst } }; decorate(chosen, orng, ph2, solids, blk, haz, prev, i, N, opt); themed(chosen, orng, st, haz, phaseIdx); floors.push(chosen); lastId = chosen.id; prev = chosen.route[chosen.route.length - 1]; yield i + 1;
+  }
+  const goal = prev; goal.kind = 'goal';
+  const tower = { seed, phase: phaseIdx, N, BASE, FH, H: BASE + 100, solids, goal, floors, hazards: haz, structs, xMin: -300, stats, log, spawn: { x: -220, y: BASE - CFG.player.h },
+                  hash: hashStr(JSON.stringify(floors.map(f => [f.id, f.mirror, f.dx]))) };
+  // validação final da torre inteira (rota completa)
+  let ok = true, p0 = solids[0];
+  stats.dropped = 0; // reparo: obstáculo que só falha com os tetos dos andares de cima é removido (nunca a rota)
+  for (let fi = 0; fi < floors.length; fi++) { const f = floors[fi]; let v = validatePairs(p0, f.route, solids.concat(blk)); const fy = BASE - fi * FH;
+    const isB = h => h.type === 'spike' || h.type === 'rspike';
+    while (!v.ok && haz.some(isB)) {
+      let bi = haz.findIndex(isB); haz.forEach((h, i) => { if (isB(h) && Math.abs(h.y - fy) < Math.abs(haz[bi].y - fy)) bi = i; });
+      haz.splice(bi, 1); stats.dropped++; log.push({ floor: fi + 1, tpl: f.id, why: 'obstáculo removido: invalidava a rota' });
+      blk.length = 0; haz.filter(isB).forEach(h => blk.push({ x: h.x, y: h.y, w: h.w, h: h.h, kind: 'wall' })); v = validatePairs(p0, f.route, solids.concat(blk)); }
+    if (!v.ok) ok = false; p0 = f.route[f.route.length - 1]; yield; }
+  solids.push(...opt, { x: -300, y: BASE, w: 300, h: 100, kind: 'floor' }, { x: -340, y: 0, w: 40, h: BASE + 100, kind: 'wall' }); stats.shortcuts = opt.length; // área externa (começa fora da torre) // atalhos entram no mundo só depois da validação
+  tower.valid = ok; stats.ms = performance.now() - t0;
+  return tower;
+}
+
+function generateTower(seed, ph) { const g = genSteps(seed, ph); let r; while (!(r = g.next()).done); return r.value; } // síncrono (testes)
+function generateTowerAsync(seed, ph) { return new Promise(res => { const g = genSteps(seed, ph); (function tick() { const t0 = performance.now(); let r;
+  do { r = g.next(); } while (!r.done && performance.now() - t0 < 10); if (r.done) res(r.value); else setTimeout(tick, 0); })(); }); } // fatias de ~10 ms
+/* validação da biblioteca: cada modelo precisa ser atravessável sozinho e encaixar nele mesmo */
+for (const t of TEMPLATES) {
+  const a = instantiate(t, 1000, false, 0), b = instantiate(t, 1000 - CFG.gen.floorH, true, 0); // encaixe com a versão espelhada
+  const walls = [{ x: 0, y: 0, w: 40, h: 2000, kind: 'wall' }, { x: 860, y: 0, w: 40, h: 2000, kind: 'wall' }];
+  if (!a || !b) { t.ok = false; continue; }
+  const S = walls.concat(a.solids, b.solids);
+  t.ok = validatePairs({ x: 0, y: a.route[0].y + 60, w: 900, h: 100, kind: 'floor' }, a.route, S).ok && validatePairs(a.route[a.route.length - 1], b.route, S).ok;
+}
+
+/* ===== core/Camera.js ===== */
+const Cam = { x: 0, y: 0, scale: 1, vw: 0, vh: CFG.viewH,
+  follow(p, dt, snap) {
+    this.vw = cv.width / this.scale;
+    const tx = p.x + p.w/2 - this.vw/2, ty = p.y + p.h/2 - this.vh * (Input.isTouch() ? 0.54 : 0.62);
+    const k = snap ? 1 : 1 - Math.exp(-7 * dt);
+    this.x += (tx - this.x) * k; this.y += (ty - this.y) * k;
+    this.y = Math.max(0, Math.min(Level.H - this.vh, this.y));
+    const x0 = Level.xMin || 0; this.x = this.vw >= Level.W - x0 ? (x0 + Level.W - this.vw) / 2 : Math.max(x0, Math.min(Level.W - this.vw, this.x));
+  } };
+
+/* ===== Renderer: só desenha o estado, não calcula física ===== */
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+function resize() { readSA(); const d = devicePixelRatio || 1; cv.width = innerWidth * d; cv.height = innerHeight * d; Cam.scale = cv.height / CFG.viewH; }
+addEventListener('resize', resize); resize();
+const COL = { plat:'#5b6ee1', floor:'#3a3f6b', wall:'#2d3057', goal:'#f2c94c', temp:'#3fbf9b' };
+let debug = new URLSearchParams(location.search).has('debug');
+
+function drawHazards() {
+  const t = Game.t;
+  for (const h of Level.hazards) {
+    if (h.y > Cam.y + Cam.vh || h.y + h.h < Cam.y) continue;
+    const st = Obstacles.state(h, t);
+    if (h.type === 'ghost' || h.type === 'shark') { const f = Obstacles.fpos(h, t);
+      if (SPR.at(ctx, h.type === 'ghost' ? 'enemies/ghost' : 'enemies/shark', f.x, f.y, f.d < 0)) { /* arte própria */ }
+      else if (h.type === 'ghost') { ctx.fillStyle = 'rgba(235,240,255,.85)'; ctx.beginPath(); ctx.arc(f.x, f.y - 3, 13, Math.PI, 0); ctx.lineTo(f.x + 13, f.y + 12); ctx.lineTo(f.x + 4, f.y + 8); ctx.lineTo(f.x - 4, f.y + 12); ctx.lineTo(f.x - 13, f.y + 8); ctx.closePath(); ctx.fill(); ctx.fillStyle = '#222'; ctx.fillRect(f.x - 6, f.y - 6, 4, 5); ctx.fillRect(f.x + 2, f.y - 6, 4, 5); }
+      else { ctx.fillStyle = '#7f94a8'; ctx.beginPath(); ctx.ellipse(f.x, f.y, 24, 11, 0, 0, 6.29); ctx.fill(); ctx.beginPath(); ctx.moveTo(f.x - 4 * f.d, f.y - 9); ctx.lineTo(f.x - 12 * f.d, f.y - 22); ctx.lineTo(f.x + 6 * f.d, f.y - 9); ctx.fill(); ctx.fillStyle = '#fff'; ctx.fillRect(f.x + 14 * f.d - 2, f.y - 4, 4, 4); } continue; }
+    if (h.type === 'eel') { if (!SPR.at(ctx, 'enemies/eel', h.cx, h.cy, false, 'c', 0, { safe: 0, warn: 1, on: 2, ret: 3 }[st])) { ctx.fillStyle = '#2b4a5a'; ctx.beginPath(); ctx.ellipse(h.cx, h.cy + 2, 20, 8, 0, 0, 6.29); ctx.fill(); ctx.fillStyle = '#f2e04a'; ctx.fillRect(h.cx + 10, h.cy - 2, 4, 4); }
+      if (st === 'warn') { ctx.strokeStyle = 'rgba(255,240,90,.6)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(h.cx, h.cy, h.R * .5 + (Math.floor(t * 10) % 2) * 6, 0, 6.29); ctx.stroke(); }
+      if (st === 'on') { ctx.fillStyle = 'rgba(255,240,90,.28)'; ctx.beginPath(); ctx.arc(h.cx, h.cy, h.R, 0, 6.29); ctx.fill(); ctx.strokeStyle = '#fff36a'; ctx.lineWidth = 3; ctx.beginPath(); for (let i = 0; i < 6; i++) { const a = i * 1.05 + t * 9; ctx.moveTo(h.cx, h.cy); ctx.lineTo(h.cx + Math.cos(a) * h.R, h.cy + Math.sin(a + .6) * h.R); } ctx.stroke(); } continue; }
+    if (h.type === 'monkey') { if (!SPR.at(ctx, 'enemies/monkey', h.mx + 12, h.my + 26, h.bvx < 0, 'b')) { ctx.fillStyle = '#8b5a2b'; ctx.fillRect(h.mx, h.my, 24, 26); ctx.fillStyle = '#e8c9a0'; ctx.fillRect(h.mx + 6, h.my + 6, 12, 10); ctx.fillStyle = '#111'; ctx.fillRect(h.mx + 8, h.my + 8, 3, 3); ctx.fillRect(h.mx + 14, h.my + 8, 3, 3); }
+      const u = (t + h.ph) % h.T; if (u < h.fl) { const b = Obstacles.banana(h, u); if (!SPR.at(ctx, 'enemies/banana', b.x, b.y, false, 'c', u * 8)) { ctx.fillStyle = '#ffe14d'; ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(u * 8); ctx.fillRect(-7, -3, 14, 6); ctx.restore(); } } continue; }
+    if (h.type === 'saw') { const z = Obstacles.zpos(h, t), cx = z.x + 14, cy = h.y + 14; if (SPR.at(ctx, 'obstacles/saw', cx, cy)) continue; ctx.fillStyle = '#c9d1d9'; ctx.beginPath(); for (let i = 0; i < 16; i++) { const a = i * .3927 + t * 12 * z.dir, r = i % 2 ? 11 : 15; ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); } ctx.closePath(); ctx.fill(); ctx.fillStyle = '#444'; ctx.beginPath(); ctx.arc(cx, cy, 4, 0, 6.29); ctx.fill(); continue; }
+    if (h.type === 'piston') { const e = st === 'on' ? 1 : st === 'ret' ? .35 : st === 'warn' ? .12 : 0, sh = st === 'warn' ? Math.sin(t * 80) * 1.5 : 0, len = 16 + e * (h.h - 16);
+      ctx.fillStyle = '#4a4f57'; ctx.fillRect(h.x + 14, h.y - 40, 12, 24 + len); ctx.fillStyle = st === 'warn' ? '#ffb347' : '#8a929c'; ctx.fillRect(h.x + sh, h.y + len - 16, h.w, 16); ctx.fillStyle = '#ff4d5e'; ctx.fillRect(h.x + sh, h.y + len - 4, h.w, 4); continue; }
+    if (h.type === 'zombie') { const z = Obstacles.zpos(h, t); if (SPR.at(ctx, 'enemies/zombie', z.x + 12, h.y + h.h, z.dir < 0, 'b')) continue; ctx.fillStyle = '#7bc36d'; ctx.fillRect(z.x, h.y, 24, h.h); ctx.fillStyle = '#1b1b1b'; ctx.fillRect(z.x + (z.dir > 0 ? 14 : 4), h.y + 7, 6, 6); ctx.fillStyle = '#ff4d5e'; ctx.fillRect(z.x + (z.dir > 0 ? 20 : 0), h.y + 18, 4, 5); continue; }
+    if (h.type === 'spin') { const a = h.a0 + h.sp * t; ctx.strokeStyle = 'rgba(255,77,94,.2)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(h.cx, h.cy, h.R, 0, 6.29); ctx.stroke();
+      ctx.strokeStyle = '#ff4d5e'; ctx.lineWidth = 8; ctx.beginPath(); ctx.moveTo(h.cx, h.cy); ctx.lineTo(h.cx + Math.cos(a) * h.R, h.cy + Math.sin(a) * h.R); ctx.stroke(); ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(h.cx, h.cy, 8, 0, 6.29); ctx.fill(); continue; }
+    if (h.type === 'rspike') { ctx.fillStyle = '#4a2a35'; ctx.fillRect(h.x, h.y + h.h - 4, h.w, 4); }
+    const k = h.type === 'spike' || st === 'on' ? 1 : st === 'safe' ? 0 : st === 'warn' ? (Math.floor(t * 12) % 2 ? .5 : .2) : .3; // aviso pisca antes de ativar
+    if (k) { ctx.fillStyle = st === 'warn' ? '#ffb347' : '#ff4d5e';
+      const n = Math.round(h.w / 12), tw = h.w / n, by = h.y + h.h; ctx.beginPath();
+      for (let i = 0; i < n; i++) { ctx.moveTo(h.x + i * tw, by); ctx.lineTo(h.x + (i + .5) * tw, by - h.h * k); ctx.lineTo(h.x + (i + 1) * tw, by); }
+      ctx.fill(); }
+    if (debug) { const b = Obstacles.hurt(h, st); if (b) { ctx.strokeStyle = '#f0f'; ctx.lineWidth = 1; ctx.strokeRect(b.x, b.y, b.w, b.h); } }
+  }
+  ctx.setLineDash([4, 4]); ctx.strokeStyle = 'rgba(79,195,161,.35)'; ctx.lineWidth = 1; // piso temporário desaparecido: contorno
+  for (const s of Level.solids) if (s.temp && s.off && s.temp.mode !== 'crumble') ctx.strokeRect(s.x, s.y, s.w, s.h);
+  ctx.setLineDash([]);
+}
+/* ===== ui/MainMenu.js + Lobby.js — telas por toque/clique (canvas). Sala LOCAL: sem rede, sem Firebase ainda ===== */
+const PCOL = ['#e63946', '#3a86ff', '#2ecc71', '#f2c94c', '#9b5de5'], UI = { screen: 'main', code: '', msg: '' };
+function uiLayout() {
+  const w = innerWidth, h = innerHeight, bw = Math.min(w - 40, 380), x = (w - bw) / 2, bh = Math.max(52, Math.min(68, h * .085)), g = 14, o = [];
+  const top = Math.max(60, h * .12); let y = UI.screen === 'lobby' ? top + 96 : Math.max(h * .4, top + 90);
+  const B = (label, fn, e = {}) => { o.push({ x, y, w: bw, h: bh, label, fn, ...e }); y += (e.h || bh) + g; };
+  if (UI.screen === 'main') { B('JOGAR', () => { UI.screen = 'play'; UI.msg = ''; }); B('TUTORIAL', () => { App.manual = true; Game.menu = false; loadTower(false); resetGame(false); }); }
+  else if (UI.screen === 'play') { B('CRIAR SALA', () => { UI.code = Math.random().toString(36).slice(2, 7).toUpperCase(); UI.screen = 'lobby'; });
+    B('ENTRAR EM SALA', () => { UI.msg = 'Entrar por código exige a versão online (Firebase), ainda não implementada.'; }); B('VOLTAR', () => { UI.screen = 'main'; UI.msg = ''; }); }
+  else { const s = (bw - 32) / 5; PCOL.forEach((c, i) => o.push({ x: x + i * (s + 8), y, w: s, h: s, swatch: c, fn: () => { App.color = c; } })); y += s + g;
+    o.push({ x, y, w: bh, h: bh, label: '◀', fn: () => { App.phase = (App.phase + 4) % 5; } }); o.push({ x: x + bw - bh, y, w: bh, h: bh, label: '▶', fn: () => { App.phase = (App.phase + 1) % 5; } });
+    o.push({ x: x + bh, y, w: bw - 2 * bh, h: bh, text: `Fase ${App.phase + 1} · ${CFG.phases[App.phase].name}\n${CFG.phases[App.phase].floors} andares` }); y += bh + g;
+    B('INICIAR', () => { App.manual = false; Game.menu = false; resetGame(true); }, { go: 1 }); B('SAIR DA SALA', () => { UI.screen = 'main'; }); }
+  return o;
+}
+function drawMenu() {
+  const d = devicePixelRatio || 1, w = cv.width, top = Math.max(60, innerHeight * .12), L = uiLayout();
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = 'rgba(8,6,20,.94)'; ctx.fillRect(0, 0, w, cv.height); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#f2c94c'; ctx.font = `bold ${Math.min(36, innerWidth * .085) * d}px system-ui,sans-serif`; ctx.fillText('TORRE DA RESENHA', w / 2, top * d);
+  ctx.fillStyle = 'rgba(255,255,255,.8)'; ctx.font = `${14 * d}px system-ui,sans-serif`;
+  if (UI.screen === 'lobby') { ctx.fillText(`Sala local (offline) · código ${UI.code}`, w / 2, (top + 38) * d); ctx.fillText('Jogadores 1/5 · você (anfitrião) · pronto', w / 2, (top + 62) * d); }
+  for (const b of L) { const X = b.x * d, Y = b.y * d, W = b.w * d, H = b.h * d;
+    if (b.swatch) { ctx.fillStyle = b.swatch; ctx.beginPath(); ctx.roundRect(X, Y, W, H, 12 * d); ctx.fill(); if (App.color === b.swatch) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 3 * d; ctx.stroke(); } continue; }
+    if (b.text) { ctx.fillStyle = '#fff'; ctx.font = `bold ${15 * d}px system-ui,sans-serif`; b.text.split('\n').forEach((t, i) => ctx.fillText(t, X + W / 2, Y + H * (.36 + i * .3))); continue; }
+    ctx.fillStyle = b.go ? '#2a9d5c' : '#2b2f66'; ctx.beginPath(); ctx.roundRect(X, Y, W, H, 14 * d); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = `bold ${19 * d}px system-ui,sans-serif`; ctx.fillText(b.label, X + W / 2, Y + H / 2); }
+  if (UI.msg) { ctx.fillStyle = '#ffb347'; ctx.font = `${13 * d}px system-ui,sans-serif`; ctx.fillText(UI.msg, w / 2, (innerHeight - 40) * d, w - 24 * d); }
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+}
+addEventListener('pointerdown', e => { if (!Game.menu) return; const b = uiLayout().find(b => b.fn && e.clientX >= b.x && e.clientX <= b.x + b.w && e.clientY >= b.y && e.clientY <= b.y + b.h); if (b) b.fn(); });
+function render(p) {
+  const g = ctx.createLinearGradient(0,0,0,cv.height); g.addColorStop(0,'#1b1440'); g.addColorStop(1,'#0e0b1a');
+  ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle = g; ctx.fillRect(0,0,cv.width,cv.height);
+  ctx.setTransform(Cam.scale,0,0,Cam.scale,-Cam.x*Cam.scale,-Cam.y*Cam.scale);
+  if (App.tower) { Level.structs.forEach((s, i) => { const y1 = Level.BASE - 2 * i * Level.FH; ctx.fillStyle = STY[s.id].bg; ctx.fillRect(40, y1 - 2 * Level.FH, Level.W - 80, 2 * Level.FH); });
+    ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.font = 'bold 22px system-ui,sans-serif'; ctx.fillText('ENTRADA ➜', -250, Level.BASE - 50); }
+  for (const s of Level.solids) {
+    if (s.y > Cam.y + Cam.vh || s.y + s.h < Cam.y) continue;
+    if (s.off) continue; const T = s.temp, sh = T && T.state === 'warn' ? Math.sin(Game.t * 90) * 1.5 : 0;
+    ctx.fillStyle = T && T.state === 'warn' ? '#ffb347' : T && T.mode === 'crumble' ? '#b07a4f' : (s.kind === 'plat' && s.sk && STY[s.sk] ? STY[s.sk].plat : COL[s.kind]); ctx.globalAlpha = T && T.state === 'back' ? .5 : 1; if (T || !SPR.tile(ctx, s, sh)) ctx.fillRect(s.x + sh, s.y, s.w, s.h); ctx.globalAlpha = 1;
+    if (s.kind === 'plat' || s.kind === 'goal') { ctx.fillStyle = 'rgba(255,255,255,.25)'; ctx.fillRect(s.x, s.y, s.w, 4); }
+  }
+  ctx.font = '14px system-ui,sans-serif'; ctx.fillStyle = 'rgba(255,255,255,.18)';
+  for (let f = 0; f < Level.N; f++) { const y = Level.BASE - f * Level.FH; ctx.fillRect(40, y, Level.W - 80, 1); ctx.fillText('ANDAR ' + (f + 1), 50, y - 6); }
+  drawHazards(); const gl = Level.goal; ctx.fillStyle = '#fff'; ctx.fillRect(gl.x + gl.w/2, gl.y - 46, 3, 46);
+  ctx.fillStyle = '#e63946'; ctx.fillRect(gl.x + gl.w/2 + 3, gl.y - 46, 24, 14);
+  ctx.globalAlpha = p.state === 'dead' ? .4 : p.invul > 0 && Math.floor(p.invul * 12) % 2 ? .4 : 1; const sp = SPR.player(ctx, p); if (!sp) { ctx.fillStyle = App.color; ctx.fillRect(p.x, p.y, p.w, p.h); if (p.hurtT > 0) { ctx.fillStyle = '#fff'; ctx.fillRect(p.x, p.y, p.w, p.h); } if (p.sliding) { ctx.fillStyle = 'rgba(255,255,255,.4)'; ctx.fillRect(p.x, p.y, p.w, p.h); }
+  ctx.fillStyle = '#fff'; ctx.fillRect(p.x + (p.face > 0 ? 12 : 3), p.y + 7, 7, 7);
+  ctx.fillStyle = '#111'; ctx.fillRect(p.x + (p.face > 0 ? 16 : 3), p.y + 9, 3, 4); }
+  ctx.globalAlpha = 1;
+  if (p.invul > 0) { ctx.strokeStyle = `rgba(90,220,255,${.5 + .3 * Math.sin(Game.t * 14 + p.invul * 14)})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(p.x + p.w / 2, p.y + p.h / 2, 24, 0, 6.29); ctx.stroke(); } // escudo = invulnerável
+  if ((p.pushT || 0) > 0) { const k = 1 - p.pushT / CFG.push.anim; ctx.save(); ctx.translate(p.x + p.w / 2, p.y + p.h / 2); ctx.scale(p.pushFace || 1, 1); ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(0, 0, 18 + CFG.push.range * k, -.9, .9); ctx.stroke(); ctx.restore(); }
+  if (Lava.y < Cam.y + Cam.vh) { const x0 = Cam.x - 20, x1 = Cam.x + Cam.vw + 20, y1 = Cam.y + Cam.vh + 20, ph = (Game.started ? Game.t : performance.now() / 1000) * 2.2; // lava: onda simples
+    const lg = ctx.createLinearGradient(0, Lava.y, 0, Lava.y + 260); lg.addColorStop(0, '#ffb02e'); lg.addColorStop(.25, '#ff5a1f'); lg.addColorStop(1, '#8a1405');
+    ctx.fillStyle = lg; ctx.beginPath(); ctx.moveTo(x0, y1); for (let x = x0; x <= x1; x += 24) ctx.lineTo(x, Lava.y + Math.sin(x * .045 + ph) * 5 + Math.sin(x * .11 - ph * 1.7) * 2.5); ctx.lineTo(x1, y1); ctx.closePath(); ctx.fill(); }
+  if (debug) { ctx.strokeStyle = '#0f0'; ctx.lineWidth = 1; ctx.strokeRect(p.x, p.y, p.w, p.h); }
+  if (debug) {
+    const T = App.tower;
+    for (const r of Level.solids) { ctx.strokeStyle = r.kind === 'wall' ? 'rgba(255,120,120,.6)' : 'rgba(120,255,120,.5)'; ctx.strokeRect(r.x, r.y, r.w, r.h); }
+    if (T) {
+      ctx.strokeStyle = '#ff0'; ctx.lineWidth = 2; ctx.beginPath(); let first = true;
+      for (const f of T.floors) for (const r of f.route) { const x = r.x + r.w/2, y = r.y - 4; first ? ctx.moveTo(x, y) : ctx.lineTo(x, y); first = false; }
+      ctx.stroke(); ctx.fillStyle = '#ff0'; ctx.font = '13px monospace';
+      T.floors.forEach((f, i) => ctx.fillText(`${i+1}: ${f.id}${f.mirror ? ' ⇄' : ''}${f.dx ? ' dx' + f.dx : ''}`, 50, Level.BASE - i*Level.FH - 24));
+    }
+  }
+  ctx.setTransform(1,0,0,1,0,0);
+  const d = devicePixelRatio || 1, fl = Level.floorOf(p.y + p.h), lines = Input.isTouch() ? [] : ['A/D ou setas: andar · Shift: sprint · Espaço: pular · N: nova torre · 1-5: fase · F3: debug'];
+  if (debug && App.tower) { const st = App.tower.stats; lines.push(`tentativas ${st.attempts} · falhas ${st.fails} · rejeitadas ${st.rejected} · fallback ${st.fallbacks} · removidos ${st.dropped} · válida ${App.tower.valid} · ${Math.round(st.ms)}ms`);
+    App.tower.log.slice(-3).forEach(l => lines.push(`rejeitado andar ${l.floor} [${l.tpl}]: ${l.why}`)); }
+  if (debug) lines.push(`lava y ${Lava.y|0} v ${Lava.v.toFixed(1)} · distância ${(Lava.y - p.y - p.h)|0}px · invul ${p.invul.toFixed(2)}`); if (debug) lines.push(`vx ${p.vx|0} vy ${p.vy|0} chão ${p.grounded} parede ${p.wallDir} deslizando ${p.sliding}`);
+  ctx.font = `bold ${18*d}px system-ui,sans-serif`; ctx.fillStyle = '#fff';
+  ctx.fillText(`ANDAR ${fl}/${Level.N}  ·  ${fmt(Game.t)}`, (14+SA.l)*d, (28+SA.t)*d);
+  ctx.font = `${12*d}px system-ui,sans-serif`; ctx.fillStyle = 'rgba(255,255,255,.7)';
+  ctx.fillText(App.tower ? `Fase ${App.phase+1} · ${CFG.phases[App.phase].name} · seed ${App.seed}` : 'Torre manual (teste)', (14+SA.l)*d, (46+SA.t)*d);
+  { const dist = Lava.y - (p.y + p.h), near = p.state === 'active' && dist < CFG.lavaWarn, k = near ? 1 - Math.max(0, dist) / CFG.lavaWarn : 0; // HUD: corações, aviso de lava
+    ctx.font = `${22*d}px system-ui,sans-serif`; for (let i = 0; i < CFG.hearts; i++) { ctx.fillStyle = i < p.hearts ? '#ff3b4e' : 'rgba(255,255,255,.22)'; ctx.fillText('♥', (14 + SA.l + i * 28)*d, (76 + SA.t)*d); }
+    if (p.invul > 0) { ctx.fillStyle = '#5adcff'; ctx.fillRect((14 + SA.l)*d, (84 + SA.t)*d, (CFG.hearts * 28 - 6)*d*p.invul/CFG.invul, 4*d); }
+    if (near) { const gl = ctx.createLinearGradient(0, cv.height, 0, cv.height * .72); gl.addColorStop(0, `rgba(255,70,20,${.55*k})`); gl.addColorStop(1, 'rgba(255,70,20,0)'); ctx.fillStyle = gl; ctx.fillRect(0, cv.height * .72, cv.width, cv.height * .28);
+      if (k > .45 && Math.floor(Game.t * 6) % 2 === 0 || k <= .45) { ctx.fillStyle = '#ffb02e'; ctx.font = `bold ${14*d}px system-ui,sans-serif`; void 0; } }
+    { const m = Math.max(0, dist / CFG.pxPerM), lv = lavaTier(m); ctx.font = `bold ${15*d}px system-ui,sans-serif`; ctx.fillStyle = lv.c; ctx.fillText(`🔥 ${m < 10 ? m.toFixed(1) : Math.round(m)}m da ${lv.t}`, (14 + SA.l)*d, (102 + SA.t)*d); } }
+  ctx.fillStyle = '#fff'; ctx.font = `${13*d}px system-ui,sans-serif`;
+  lines.forEach((t,i) => ctx.fillText(t, (10+SA.l)*d, (126 + SA.t + i*18)*d));
+  if (Input.isTouch() && !Game.menu) {
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const b of Input.layout()) {
+      const pc = b.a === 'push', cd = pc ? (player.pushCd || 0) : 0; ctx.globalAlpha = Input.down(b.a) ? .55 : .22; ctx.fillStyle = pc && (player.pushDeny || 0) > 0 ? '#ff4d5e' : pc && !cd ? '#ffd23f' : '#fff';
+      ctx.beginPath(); ctx.roundRect(b.x*d, b.y*d, b.w*d, b.h*d, 18*d); ctx.fill();
+      if (cd > 0) { ctx.globalAlpha = .6; ctx.fillStyle = '#000'; ctx.beginPath(); ctx.roundRect(b.x*d, b.y*d, b.w*d, b.h*d * (cd / CFG.push.cooldown), 18*d); ctx.fill(); }
+      ctx.globalAlpha = .95; ctx.fillStyle = '#fff'; ctx.font = `bold ${Math.min(b.w, b.h)*(b.t.length > 5 && !cd ? 0.2 : 0.28)*d}px system-ui,sans-serif`;
+      ctx.fillText(cd > 0 ? Math.ceil(cd) + 's' : b.t, (b.x + b.w/2)*d, (b.y + b.h/2)*d);
+    }
+    ctx.globalAlpha = 1; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  }
+  if (Game.loading) { ctx.fillStyle = 'rgba(8,6,20,.85)'; ctx.fillRect(0, 0, cv.width, cv.height); ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = `bold ${20*d}px system-ui,sans-serif`; ctx.fillText('Gerando torre…', cv.width/2, cv.height/2); ctx.textAlign = 'left'; }
+  if (!Game.menu && !Game.loading && !Game.over && !Game.done) { ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    if (Game.cd < 4) { const n = Math.floor(Game.cd), f = Game.cd - n; ctx.globalAlpha = 1 - f * .5; ctx.fillStyle = n < 3 ? '#fff' : '#ffd23f'; ctx.font = `bold ${(n < 3 ? 110 : 52) * d * (1 + .25 * (1 - f))}px system-ui,sans-serif`; ctx.fillText(n < 3 ? String(n + 1) : 'RESENHEM!', cv.width / 2, cv.height * .38, cv.width - 20 * d); ctx.globalAlpha = 1; }
+    const B = Game.banner; if (B) { ctx.globalAlpha = Math.min(1, B.t); ctx.fillStyle = '#fff'; ctx.font = `bold ${30 * d}px system-ui,sans-serif`; ctx.fillText(B.n, cv.width / 2, cv.height * .2, cv.width - 20 * d); ctx.fillStyle = '#ffd23f'; ctx.font = `${15 * d}px system-ui,sans-serif`; ctx.fillText(B.s, cv.width / 2, cv.height * .2 + 30 * d); ctx.globalAlpha = 1; }
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; }
+  if (Game.menu) drawMenu();
+  else if (Game.over) {
+    ctx.fillStyle = 'rgba(8,6,20,.72)'; ctx.fillRect(0, 0, cv.width, cv.height); ctx.textAlign = 'center'; ctx.fillStyle = '#ff4d5e'; ctx.font = `bold ${34*d}px system-ui,sans-serif`;
+    ctx.fillText('FOI RESENHADO', cv.width/2, cv.height*0.40); ctx.fillStyle = '#fff'; ctx.font = `${18*d}px system-ui,sans-serif`;
+    ctx.fillText(p.cause === 'lava' ? 'A lava te alcançou (morte direta)' : 'Você perdeu os dois corações', cv.width/2, cv.height*0.47);
+    ctx.fillText('Andar ' + Level.floorOf(p.y + p.h) + '/' + Level.N + ' · ' + fmt(Game.t), cv.width/2, cv.height*0.52);
+    ctx.font = `${15*d}px system-ui,sans-serif`; ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.fillText('Sem outros jogadores ativos para assistir (espectador só no multiplayer)', cv.width/2, cv.height*0.58, cv.width - 24*d);
+    if (Game.endT > .8) ctx.fillText(Input.isTouch() ? 'PULAR: nova torre (nova seed) · ☰: menu' : 'Espaço: nova torre (nova seed)', cv.width/2, cv.height*0.63); ctx.textAlign = 'left'; }
+  else if (Game.done) {
+    ctx.fillStyle = 'rgba(8,6,20,.72)'; ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.textAlign = 'center'; ctx.fillStyle = '#f2c94c'; ctx.font = `bold ${34*d}px system-ui,sans-serif`;
+    ctx.fillText('TORRE CONCLUÍDA!', cv.width/2, cv.height*0.42);
+    ctx.fillStyle = '#fff'; ctx.font = `${22*d}px system-ui,sans-serif`;
+    ctx.fillText('Tempo: ' + fmt(Game.t) + ' · corações: ' + p.hearts + '/' + CFG.hearts, cv.width/2, cv.height*0.50);
+    ctx.font = `${15*d}px system-ui,sans-serif`;
+    const nx = App.manual ? 'Fase 1 · ' + CFG.phases[0].name : App.phase < 4 ? 'PRÓXIMA FASE ' + (App.phase + 2) + ' · ' + CFG.phases[App.phase + 1].name : 'jogar a Fase 5 de novo'; ctx.fillText((Input.isTouch() ? 'PULAR: ' : 'Espaço: ') + nx, cv.width/2, cv.height*0.57, cv.width - 24*d);
+    ctx.textAlign = 'left';
+  }
+}
+
+/* ===== core/GameLoop.js — passo fixo + render independente ===== */
+const Q0 = new URLSearchParams(location.search), player = newPlayer();
+const Game = { t: 0, started: false, done: false, over: false, endT: 0, hits: 0, cd: 0, entered: false, curS: null, banner: null, menu: !(Q0.has('fase') || Q0.has('seed') || Q0.has('torre') || Q0.has('teste')) };
+const Players = [player]; // lista de jogadores (hoje 1; o multiplayer acrescenta os outros)
+const Q = new URLSearchParams(location.search);
+const App = { phase: Math.min(5, Math.max(1, +Q.get('fase') || 1)) - 1, seed: Q.get('seed'), manual: Q.get('torre') === 'manual', tower: null, color: '#e63946' };
+let loadTk = 0;
+function loadTower(fresh) {
+  if (App.manual) { loadTk++; Game.loading = false; Level.set(ManualData); App.tower = null; return; }
+  if (fresh || App.seed == null) App.seed = String(Math.floor(Math.random() * 1e9)); // única aleatoriedade: criar a seed
+  Game.loading = true; const tk = ++loadTk;
+  generateTowerAsync(App.seed, App.phase).then(t => { if (tk !== loadTk) return; App.tower = t; Level.set(t); Object.assign(player, newPlayer()); player.safe = null; Obstacles.reset(); Lava.reset(); Game.loading = false; first = true; });
+}
+loadTower(false); Object.assign(player, newPlayer());
+const fmt = t => `${Math.floor(t/60)}:${(t%60).toFixed(1).padStart(4,'0')}`;
+function structAt(p) { const T = App.tower; return T && T.structs ? T.structs[(Level.floorOf(p.y + p.h) - 1) >> 1] || null : null; }
+function resetGame(fresh) { if (fresh) loadTower(true); Object.assign(player, newPlayer()); Game.t = 0; Game.started = false; Game.done = false; Game.over = false; Game.endT = 0; Game.hits = 0; Game.cd = 0; Game.entered = false; Game.curS = null; Game.banner = null; Lava.mult = 1; player.pushCd = 0; player.pushT = 0; player.safe = null; Obstacles.reset(); Lava.reset(); }
+let last = performance.now(), acc = 0, first = true;
+function frame(now) {
+  const dt = Math.min((now - last) / 1000, CFG.maxFrame); last = now; acc += dt;
+  while (acc >= CFG.step) {
+    if (Input.pressed('debug')) debug = !debug;
+    if (Input.pressed('menu') || Input.pressed('pause')) { Game.menu = !Game.menu; if (Game.menu) UI.screen = 'main'; }
+    for (let i = 0; i < 5; i++) if (Input.pressed('ph' + (i + 1))) { App.phase = i; App.manual = false; Game.menu = false; resetGame(true); }
+    if (Game.menu || Game.loading) { Input.endStep(); acc -= CFG.step; continue; }
+    if (Input.pressed('newTower')) resetGame(true);
+    else if (Game.done && Input.pressed('jump')) { App.phase = App.manual ? 0 : Math.min(4, App.phase + 1); App.manual = false; resetGame(true); } // concluiu: vai para a próxima fase
+    else if (Game.over && Game.endT > .8 && Input.pressed('jump')) resetGame(true); // morreu: sempre nova seed
+    else if (Game.over) Game.endT += CFG.step;
+    else if (Game.cd < 3) Game.cd += CFG.step; // contagem 1, 2, 3: ninguém se mexe; o cronômetro só roda depois
+    else if (!Game.done) {
+      Game.cd += CFG.step; Game.started = true; Game.t += CFG.step;
+      if (!Game.entered && player.x + player.w / 2 > 48) Game.entered = true; // a lava só começa a contar depois que alguém entra na torre
+      Lava.mult = (structAt(player) || { mult: 1 }).mult; Lava.update(CFG.step);
+      if (player.state === 'active') { stepPlayer(player, CFG.step); Obstacles.update(player, CFG.step); Combat.update(player, CFG.step); }
+      const sa = structAt(player); if (Game.entered && sa && sa !== Game.curS) { Game.curS = sa; Game.banner = { n: sa.name, s: `${sa.size} · ${sa.diff}`, t: 3 }; }
+      Survival.update(player, CFG.step);
+      if (!Game.done && Players.every(x => x.state === 'dead')) Game.over = true; // fim: todos eliminados
+      const g = Level.goal;
+      if (player.state === 'active' && player.grounded && player.x < g.x+g.w && player.x+player.w > g.x && Math.abs(player.y+player.h-g.y) < 1) { Game.done = true; player.state = 'done'; }
+    }
+    Input.endStep(); acc -= CFG.step;
+  }
+  Cam.follow(player.state === 'dead' ? (Players.find(x => x.state === 'active') || player) : player, dt, first); first = false; // espectador: segue um jogador ativo
+  if (Game.banner) { Game.banner.t -= dt; if (Game.banner.t <= 0) Game.banner = null; }
+  render(player);
+  requestAnimationFrame(frame);
+}
+if (Q.get('teste') === 'vida') { const el = document.createElement('pre'); el.style.cssText = 'position:fixed;inset:0;margin:0;padding:12px;background:#0b0818;color:#cfe;font:13px monospace;white-space:pre-wrap;z-index:9'; const r = Survival.selfTest(); el.textContent = 'TESTES DE SOBREVIVÊNCIA\n' + r.map(([n, o]) => (o ? 'OK   ' : 'FALHOU ') + n).join('\n'); document.body.appendChild(el); }
+else if (Q.has('teste')) runTests(+Q.get('teste') || 20);
+requestAnimationFrame(frame);
+
+/* ===== modo de teste: abra index.html?teste=20 (opcional &fase=N) ===== */
+function runTests(n) {
+  const el = document.createElement('pre');
+  el.style.cssText = 'position:fixed;inset:0;margin:0;padding:12px;background:#0b0818;color:#cfe;font:12px monospace;overflow:auto;white-space:pre-wrap;z-index:9';
+  document.body.appendChild(el);
+  const out = t => { el.textContent += t + '\n'; }, rows = [], hashes = {}, jobs = [];
+  const phases = Q.get('fase') ? [App.phase] : [0, 1, 2, 3, 4];
+  out(`TESTE DE GERAÇÃO v${GEN_VERSION} — ${n} seeds por fase. Modelos válidos: ${TEMPLATES.filter(t => t.ok).map(t => t.id).join(', ')}`);
+  const bad = TEMPLATES.filter(t => !t.ok); if (bad.length) out('MODELOS REPROVADOS: ' + bad.map(t => t.id).join(', '));
+  phases.forEach(ph => { for (let s = 1; s <= n; s++) jobs.push([ph, s]); });
+  let k = 0;
+  (function next() {
+    const t0 = performance.now();
+    while (k < jobs.length && performance.now() - t0 < 60) {
+      const [ph, s] = jobs[k++], tw = generateTower('t' + s, ph), st = tw.stats;
+      rows.push({ seed: 't' + s, fase: ph + 1, andares: tw.N, tentativas: st.attempts, falhas: st.fails, rejeitadas: st.rejected, fallback: st.fallbacks, valida: tw.valid, ms: Math.round(st.ms) });
+      (hashes[ph] = hashes[ph] || new Set()).add(tw.hash);
+      if (!tw.valid || st.fallbacks) out(`! fase ${ph + 1} seed t${s}: válida=${tw.valid} fallbacks=${st.fallbacks}`);
+    }
+    if (k < jobs.length) { setTimeout(next, 0); return; }
+    phases.forEach(ph => {
+      const r = rows.filter(x => x.fase === ph + 1), sum = f => r.reduce((a, x) => a + x[f], 0);
+      const det = generateTower('t1', ph).hash === generateTower('t1', ph).hash;
+      out(`Fase ${ph + 1} (${r[0].andares} andares): válidas ${r.filter(x => x.valida).length}/${r.length} · distintas ${hashes[ph].size}/${r.length} · determinística ${det} · fallbacks ${sum('fallback')} · tentativas ${sum('tentativas')} · falhas ${sum('falhas')} · ms médio ${Math.round(sum('ms') / r.length)}`);
+    });
+    console.table(rows); out('FIM (tabela completa no console)');
+  })();
+}
+</script></body></html>
