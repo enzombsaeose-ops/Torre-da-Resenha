@@ -1,20 +1,23 @@
-# assets/images/obstacles
+# Obstáculos
+Pasta: `assets/images/obstacles/` — tudo em **minúsculo**, formato **.png**.
+Armadilhas e objetos do cenário.
 
-Obstáculos e mecanismos.
+## Já ligado no código (é só salvar o arquivo com este nome)
+| Arquivo | Tipo | Tamanho sugerido | Quando aparece |
+|---|---|---|---|
+| `spike.png` | animada | 16×16 | espinho fixo (repetido a cada ~18 px) |
+| `rspike.png` | animada, 4 quadros FIXOS | 16×16 | espinho retrátil: 1 seguro, 2 aviso, 3 ativo, 4 recolhendo (sem ela usa `spike`) |
+| `saw.png` | animada | 32×32 | serra (com 1 quadro o jogo gira) |
+| `spin_bar.png` | inteira | 56×12 | barra giratória: pivô na esquerda, aponta para a direita |
+| `spin_hub.png` | animada | 16×16 | pivô da barra |
+| `piston_body.png` | inteira | 12×40 | haste do pistão (estica na vertical) |
+| `piston_head.png` | inteira | 40×16 | cabeça do pistão |
+| `flag.png` | animada | 48×48 | bandeira da meta |
 
-Regras: PNG com fundo transparente · cada quadro **32x32 px** · vários quadros ficam LADO A LADO na mesma imagem (o jogo conta sozinho: largura ÷ 32) · nome em minúsculas, sem acento e sem espaço.
+## Ainda NÃO ligado (nome reservado; só funciona depois que a mecânica existir no jogo)
+- `spring` plataforma impulsionadora · `fan` ventilador · `door` porta · `switch` interruptor · `gravity_zone` zona de gravidade invertida — esses obstáculos da Etapa 4 ainda não foram implementados.
 
-| Arquivo (.png) | Situação | O que é |
-|---|---|---|
-| `saw` | ✅ já funciona | serra |
-| `spike` | 🕓 reservado (ainda sem código) | espinho fixo |
-| `retractable-spike` | 🕓 reservado (ainda sem código) | espinho retrátil (4 quadros: seguro, aviso, ativo, recuando) |
-| `spinner` | 🕓 reservado (ainda sem código) | barra giratória |
-| `piston` | 🕓 reservado (ainda sem código) | pistão |
-| `fan` | 🕓 reservado (ainda sem código) | ventilador |
-| `spring` | 🕓 reservado (ainda sem código) | plataforma impulsionadora |
-| `door` | 🕓 reservado (ainda sem código) | porta |
-| `switch` | 🕓 reservado (ainda sem código) | interruptor |
-| `gravity-zone` | 🕓 reservado (ainda sem código) | zona de gravidade invertida |
-| `crumble` | 🕓 reservado (ainda sem código) | plataforma que desmorona |
-| `temp-platform` | 🕓 reservado (ainda sem código) | piso temporário |
+## Regras
+- **Animada** = tira horizontal de quadros quadrados (96×32 = 3 quadros). **Inteira** = imagem única, esticada.
+- Desenhe olhando para a **direita**.
+- Arquivo ausente = o jogo usa a forma vetorial antiga. Para conferir: `index.html?assets`.
