@@ -1,15 +1,25 @@
-# assets/images/tiles
+# Texturas (tiles)
+Pasta: `assets/images/tittles/` — tudo em **minúsculo**, formato **.png**.
+O jogo aceita esta pasta com o nome `tittles` (e também `tiles`/`titles`). Textura quadrada repetida; usa o 1º quadro. Plataformas têm 20 px de altura: aparece só a faixa de cima.
 
-Texturas que se REPETEM em plataformas, paredes e chão (um quadro 32x32 vira azulejo).
+## Já ligado no código (é só salvar o arquivo com este nome)
+| Arquivo | Tipo | Tamanho sugerido | Quando aparece |
+|---|---|---|---|
+| `plat.png` | animada (1º quadro) | 32×32 | plataforma comum |
+| `wall.png` | idem | 32×32 | parede |
+| `floor.png` | idem | 32×32 | chão |
+| `goal.png` | idem | 32×32 | plataforma da meta |
+| `temp.png` | idem | 32×32 | piso temporário |
+| `temp_warn.png` | idem | 32×32 | piso temporário avisando |
+| `crumble.png` | idem | 32×32 | plataforma que desmorona |
+| `crumble_warn.png` | idem | 32×32 | desmoronando (aviso) |
+| `<estrutura>_plat.png` | idem | 32×32 | plataforma de uma estrutura: `cemiterio_plat`, `floresta_plat`, `corredor_plat`, `oceano_plat`, `fabrica_plat` |
+| `<estrutura>_wall.png` | idem | 32×32 | parede de uma estrutura: `cemiterio_wall`, `floresta_wall`... |
 
-Regras: PNG com fundo transparente · cada quadro **32x32 px** · vários quadros ficam LADO A LADO na mesma imagem (o jogo conta sozinho: largura ÷ 32) · nome em minúsculas, sem acento e sem espaço.
+## Ainda NÃO ligado (nome reservado; só funciona depois que a mecânica existir no jogo)
+- Estruturas novas: use `<id>_plat` e `<id>_wall` com o id que o editor gerar.
 
-| Arquivo (.png) | Situação | O que é |
-|---|---|---|
-| `plat` | ✅ já funciona | plataforma padrão (qualquer estrutura sem arte própria) |
-| `wall` | ✅ já funciona | parede padrão |
-| `floor` | ✅ já funciona | chão |
-| `goal` | ✅ já funciona | plataforma da meta |
-| `<id>_plat` | ✅ já funciona | plataforma de UMA estrutura. Ex.: lar_plat, cemiterio_plat |
-| `<id>_wall` | ✅ já funciona | parede de UMA estrutura. Ex.: lar_wall |
-| `(ids atuais)` | ✅ já funciona | cemiterio, floresta, corredor, oceano, fabrica, lar. Estrutura nova = o id dela entra automaticamente |
+## Regras
+- **Animada** = tira horizontal de quadros quadrados (96×32 = 3 quadros). **Inteira** = imagem única, esticada.
+- Desenhe olhando para a **direita**.
+- Arquivo ausente = o jogo usa a forma vetorial antiga. Para conferir: `index.html?assets`.
