@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<title>TORRE DA RESENHA — Etapa 5 + estruturas</title>
+<title>TORRE DA RESENHA — Etapa 5 + estruturas + sprites</title>
 <style>html,body{margin:0;height:100%;background:#0e0b1a;overflow:hidden}html,body{overscroll-behavior:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}#sa{position:fixed;visibility:hidden;pointer-events:none;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}canvas{display:block;width:100%;height:100%;touch-action:none;user-select:none;-webkit-user-select:none}</style>
 </head><body><canvas id="c"></canvas><div id="sa"></div>
 <script>
@@ -213,37 +213,68 @@ function themed(c, rng, st, haz, pi) {
   }
 }
 
-/* ===== core/Sprites.js — carrega PNGs da pasta assets/images/. Arquivo ausente = o jogo usa a forma antiga (nunca quebra) =====
-   Regras: cada quadro = 32x32 px. Uma imagem pode ter vários quadros LADO A LADO (tira horizontal): o jogo conta sozinho (largura / 32).
-   Para ligar uma arte nova: salve o PNG com o nome certo na pasta certa. Não precisa mexer no código. */
+/* ===== core/Sprites.js — SISTEMA DE ARTES v2 (qualquer coisa do jogo pode ter sprite) =====
+   PASTA: assets/images/<pasta>/<nome>.png   (player, enemies, obstacles, tiles, effects, ui, backgrounds — "tittles" ou "titles" também valem no lugar de "tiles")
+   DOIS TIPOS DE ARTE:
+     ANIMADA  = tira horizontal de quadros QUADRADOS lado a lado (nº de quadros = largura ÷ altura). 1 quadro = imagem quadrada (16, 32, 64...). Tamanho no jogo = tamanho do quadro (1 px de arte = 1 px do mundo), a menos que SPR.dim diga outro.
+     INTEIRA  = imagem única, de qualquer proporção, esticada no espaço do jogo (ui, backgrounds, barras, partes de pistão...).
+   Arquivo ausente = o jogo desenha a forma vetorial antiga (nunca quebra). Nome novo = carregado sozinho na 1ª vez que o código pedir.
+   Artes olham para a DIREITA (o jogo espelha ao virar). Painel de conferência: abra index.html?assets */
 const SPR = {
-  base: 'assets/images/', frame: 32, fps: 8, img: {}, pat: {}, st: {}, url: {}, dbg: new URLSearchParams(location.search).has('assets'),
-  dim: { /* tamanho de desenho no mundo (px) [largura, altura]; padrão 32x32. Use múltiplos de 32 (64, 96) para a arte não ficar borrada */
+  base: 'assets/images/', fps: 8, img: {}, pat: {}, st: {}, url: {}, dbg: new URLSearchParams(location.search).has('assets'),
+  alias: { tiles: ['tittles', 'titles'] },                 // pastas alternativas (o repositório do projeto usa "tittles")
+  colorSkins: false,                                       // true = tenta player/<cor>/<estado>.png (vermelho, azul, verde, amarelo, roxo) antes de player/<estado>.png
+  CN: { '#e63946': 'vermelho', '#3a86ff': 'azul', '#2ecc71': 'verde', '#f2c94c': 'amarelo', '#9b5de5': 'roxo' },
+  dim: { /* tamanho de desenho no mundo [largura, altura] — só se a arte tiver resolução maior/menor que o tamanho no jogo. Ex.: 'player/idle': [32, 32] com arte 64x64 */
     'enemies/shark': [64, 64] },
-  files: ['player/idle', 'player/walk', 'player/run', 'player/jump', 'player/fall', 'player/wall', 'player/hurt', 'player/dead', 'player/push',
-    'enemies/monkey', 'enemies/banana', 'enemies/zombie', 'enemies/ghost', 'enemies/shark', 'enemies/eel', 'obstacles/saw', 'tiles/plat', 'tiles/wall', 'tiles/floor', 'tiles/goal'],
-  load() { for (const id of [...STRUCTS, ...(typeof DRAWN === 'undefined' ? [] : DRAWN)].map(s => s.id)) this.files.push('tiles/' + id + '_plat', 'tiles/' + id + '_wall'); // estrutura nova ganha texturas só pelo nome (id)
-    for (const k of this.files) { const im = new Image(); im.onload = () => { this.img[k] = im; this.st[k] = 'ok'; }; im.onerror = () => { this.st[k] = 'falta'; }; im.src = this.base + k + '.png'; this.url[k] = im.src; } },
-  overlay(ctx, d) { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = 'rgba(0,0,0,.82)'; ctx.fillRect(0, 0, cv.width, cv.height); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.font = `bold ${13 * d}px monospace`; ctx.fillStyle = '#ffd23f';
-    ctx.fillText('ARTES — pasta: ' + new URL(this.base, location.href).href, 8 * d, 20 * d, cv.width - 16 * d); let y = 40;
-    for (const k of this.files) { const s = this.st[k] || '...'; ctx.font = `${12 * d}px monospace`; ctx.fillStyle = s === 'ok' ? '#6dff9a' : s === 'falta' ? '#ff6b6b' : '#aaa'; ctx.fillText((s === 'ok' ? '✔ ' : s === 'falta' ? '✘ ' : '… ') + k + '.png', 8 * d, y * d, cv.width * .62);
-      if (s === 'ok') { ctx.imageSmoothingEnabled = false; ctx.drawImage(this.img[k], 0, 0, this.frame, this.img[k].height, cv.width - 44 * d, (y - 12) * d, 32 * d * .55, 32 * d * .55); } y += 16; if (y * d > cv.height - 30 * d) break; }
-    ctx.fillStyle = '#fff'; ctx.font = `${11 * d}px monospace`; ctx.fillText('✘ = o jogo NÃO achou esse arquivo (confira pasta, nome e maiúsculas)', 8 * d, cv.height - 10 * d, cv.width - 16 * d); ctx.restore(); },
-  has(k) { return !!this.img[k]; },
-  at(ctx, k, x, y, flip = false, anchor = 'c', rot = 0, frame = null) { // anchor: 'c' centro em (x,y) · 'b' base centralizada em (x,y)
-    const im = this.img[k]; if (!im) return false;
-    const [w, h] = this.dim[k] || [32, 32], n = Math.max(1, Math.floor(im.width / this.frame)), f = frame != null ? Math.min(frame, n - 1) : Math.floor(performance.now() / 1000 * this.fps) % n;
+  fpsOf: { 'player/walk': 10, 'player/run': 14, 'obstacles/saw': 16, 'obstacles/flag': 6, 'effects/lava': 4, 'effects/shield': 10 }, // quadros por segundo (padrão: fps)
+  PS: ['idle', 'walk', 'run', 'jump', 'fall', 'wall', 'hurt', 'dead', 'push', 'done'],
+  files: ['player/idle', 'player/walk', 'player/run', 'player/jump', 'player/fall', 'player/wall', 'player/hurt', 'player/dead', 'player/push', 'player/done',
+    'enemies/zombie', 'enemies/ghost', 'enemies/shark', 'enemies/eel', 'enemies/monkey', 'enemies/banana',
+    'obstacles/spike', 'obstacles/rspike', 'obstacles/saw', 'obstacles/spin_bar', 'obstacles/spin_hub', 'obstacles/piston_body', 'obstacles/piston_head', 'obstacles/flag',
+    'tiles/plat', 'tiles/wall', 'tiles/floor', 'tiles/goal', 'tiles/temp', 'tiles/temp_warn', 'tiles/crumble', 'tiles/crumble_warn',
+    'effects/lava', 'effects/lava_body', 'effects/shield', 'effects/hit', 'effects/push',
+    'ui/heart_full', 'ui/heart_empty', 'ui/title', 'ui/button', 'ui/button_go', 'ui/btn_left', 'ui/btn_right', 'ui/btn_jump', 'ui/btn_sprint', 'ui/btn_push', 'ui/btn_menu',
+    'ui/btn_left_down', 'ui/btn_right_down', 'ui/btn_jump_down', 'ui/btn_sprint_down', 'ui/btn_push_down', 'ui/btn_menu_down',
+    'backgrounds/main', 'backgrounds/menu'],
+  load() { const ids = [...STRUCTS, ...(typeof DRAWN === 'undefined' ? [] : DRAWN)].map(s => s.id); // estrutura nova ganha arte só pelo nome (id)
+    for (const i of ids) this.files.push('tiles/' + i + '_plat', 'tiles/' + i + '_wall', 'backgrounds/' + i);
+    if (this.colorSkins) for (const c of Object.values(this.CN)) for (const s of this.PS) this.files.push('player/' + c + '/' + s);
+    for (const k of this.files) this.get(k); },
+  get(k) { if (!(k in this.st)) this.fetch(k); return this.img[k] || null; },   // devolve a imagem ou null (ainda carregando / ausente); pede o arquivo 1 vez só
+  fetch(k) { this.st[k] = '...'; const i0 = k.indexOf('/'), dir = k.slice(0, i0), name = k.slice(i0 + 1), dirs = [dir, ...(this.alias[dir] || [])], im = new Image(); let i = 0;
+    const next = () => { if (i >= dirs.length) { this.st[k] = 'falta'; return; } im.src = this.url[k] = this.base + dirs[i++] + '/' + name + '.png'; };
+    im.onload = () => { this.img[k] = im; this.st[k] = 'ok'; }; im.onerror = next; next(); },
+  has(k) { return !!this.get(k); },
+  frames(im) { return Math.max(1, Math.round(im.width / im.height)); },
+  fr(k, u) { const im = this.get(k); return im ? Math.min(this.frames(im) - 1, Math.max(0, Math.floor(u * this.frames(im)))) : 0; }, // quadro pelo progresso 0..1 (efeitos de uma só passada)
+  at(ctx, k, x, y, flip = false, anchor = 'c', rot = 0, frame = null, sz = null) { // ANIMADA. anchor: 'c' centro em (x,y) · 'b' base centralizada em (x,y). sz = [w,h] opcional
+    const im = this.get(k); if (!im) return false;
+    const fh = im.height, n = this.frames(im), [w, h] = sz || this.dim[k] || [fh, fh], f = frame != null ? Math.min(Math.max(0, frame | 0), n - 1) : Math.floor(performance.now() / 1000 * (this.fpsOf[k] || this.fps)) % n;
     ctx.imageSmoothingEnabled = false; ctx.save(); ctx.translate(x, anchor === 'b' ? y - h / 2 : y); if (rot) ctx.rotate(rot); if (flip) ctx.scale(-1, 1);
-    ctx.drawImage(im, f * this.frame, 0, this.frame, im.height, -w / 2, -h / 2, w, h); ctx.restore(); return true; },
-  player(ctx, p) { // escolhe o quadro pelo estado do jogador; se faltar a arte do estado, cai para a mais parecida
-    const mv = Math.abs(p.vx) > 8, want = p.state === 'dead' ? ['dead', 'hurt'] : p.hurtT > 0 ? ['hurt'] : (p.pushT || 0) > 0 ? ['push'] : p.sliding ? ['wall'] : !p.grounded ? [p.vy < 0 ? 'jump' : 'fall'] : mv ? [Math.abs(p.vx) > CFG.walk + 20 ? 'run' : 'walk', 'walk'] : [];
-    for (const s of [...want, 'idle']) if (this.has('player/' + s)) return this.at(ctx, 'player/' + s, p.x + p.w / 2, p.y + p.h, p.face < 0, 'b');
+    ctx.drawImage(im, f * fh, 0, fh, fh, -w / 2, -h / 2, w, h); ctx.restore(); return true; },
+  pic(ctx, k, x, y, w, h, smooth = false) { const im = this.get(k); if (!im) return false; ctx.imageSmoothingEnabled = smooth; ctx.drawImage(im, x, y, w, h); return true; }, // INTEIRA, esticada em (x,y,w,h)
+  bar(ctx, k, cx, cy, len, th, ang) { const im = this.get(k); if (!im) return false; ctx.imageSmoothingEnabled = false; ctx.save(); ctx.translate(cx, cy); ctx.rotate(ang); ctx.drawImage(im, 0, -th / 2, len, th); ctx.restore(); return true; }, // barra: nasce no pivô e aponta para a direita
+  parallax(ctx, k, t, W, H) { const im = this.get(k); if (!im) return false; const s = Math.max(W / im.width, H * 1.3 / im.height), w = im.width * s, h = im.height * s; // fundo "cover" que desliza com a subida (t: 0 topo .. 1 base)
+    ctx.imageSmoothingEnabled = true; ctx.drawImage(im, (W - w) / 2, -(h - H) * Math.min(1, Math.max(0, t)), w, h); return true; },
+  pattern(ctx, k) { const im = this.get(k); if (!im) return null; if (!this.pat[k]) { const fh = im.height, c = document.createElement('canvas'); c.width = c.height = fh; c.getContext('2d').drawImage(im, 0, 0, fh, fh, 0, 0, fh, fh); this.pat[k] = ctx.createPattern(c, 'repeat'); } return this.pat[k]; },
+  fillPat(ctx, k, x, y, w, h) { const p = this.pattern(ctx, k); if (!p) return false; ctx.imageSmoothingEnabled = false; ctx.fillStyle = p; ctx.fillRect(x, y, w, h); return true; },
+  player(ctx, p) { // escolhe o quadro pelo estado; se faltar a arte do estado, cai para a mais parecida (e por fim idle)
+    const mv = Math.abs(p.vx) > 8, want = p.state === 'done' ? ['done'] : p.state === 'dead' ? ['dead', 'hurt'] : p.hurtT > 0 ? ['hurt'] : (p.pushT || 0) > 0 ? ['push'] : p.sliding ? ['wall'] : !p.grounded ? [p.vy < 0 ? 'jump' : 'fall'] : mv ? [Math.abs(p.vx) > CFG.walk + 20 ? 'run' : 'walk', 'walk'] : [],
+      cn = this.colorSkins && this.CN[p.color || App.color];
+    for (const s of [...want, 'idle']) { const k = (cn ? ['player/' + cn + '/' + s] : []).concat('player/' + s).find(q => this.has(q)); if (k) return this.at(ctx, k, p.x + p.w / 2, p.y + p.h, p.face < 0, 'b'); }
     return false; },
-  tile(ctx, s, sh) { // textura repetida em plataformas/paredes/chão
-    const ks = s.kind === 'wall' ? ['tiles/' + s.sk + '_wall', 'tiles/wall'] : s.kind === 'floor' ? ['tiles/floor'] : s.kind === 'goal' ? ['tiles/goal', 'tiles/plat'] : ['tiles/' + s.sk + '_plat', 'tiles/plat'];
-    const k = ks.find(q => this.img[q]); if (!k) return false;
-    if (!this.pat[k]) { const im = this.img[k], c = document.createElement('canvas'); c.width = c.height = this.frame; c.getContext('2d').drawImage(im, 0, 0, this.frame, im.height, 0, 0, this.frame, this.frame); this.pat[k] = ctx.createPattern(c, 'repeat'); }
-    ctx.imageSmoothingEnabled = false; ctx.save(); ctx.translate(s.x + sh, s.y); ctx.fillStyle = this.pat[k]; ctx.fillRect(0, 0, s.w, s.h); ctx.restore(); return true; }
+  tileKeys(s) { const a = s.sk ? 'tiles/' + s.sk : null; return s.kind === 'wall' ? [a && a + '_wall', 'tiles/wall'].filter(Boolean) : s.kind === 'floor' ? ['tiles/floor'] : s.kind === 'goal' ? ['tiles/goal', 'tiles/plat'] : [a && a + '_plat', 'tiles/plat'].filter(Boolean); },
+  tile(ctx, s, sh, keys) { // textura repetida em plataformas/paredes/chão (1º quadro quadrado da imagem; plataformas têm 20 px de altura: aparece a faixa de cima)
+    const k = (keys || this.tileKeys(s)).find(q => this.get(q)); if (!k) return false;
+    ctx.save(); ctx.translate(s.x + sh, s.y); this.fillPat(ctx, k, 0, 0, s.w, s.h); ctx.restore(); return true; },
+  overlay(ctx, d) { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = 'rgba(0,0,0,.88)'; ctx.fillRect(0, 0, cv.width, cv.height); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.font = `bold ${12 * d}px monospace`; ctx.fillStyle = '#ffd23f'; ctx.fillText('ARTES — ' + new URL(this.base, location.href).href, 8 * d, 16 * d, cv.width - 16 * d);
+    const rh = 13 * d, top = 32 * d, colW = 176 * d, cols = Math.max(1, Math.floor(cv.width / colW)), rows = Math.max(1, Math.floor((cv.height - top - 24 * d) / rh)); let ok = 0;
+    this.files.forEach((k, i) => { const s = this.st[k] || '...', c = Math.floor(i / rows); if (s === 'ok') ok++; if (c >= cols) return; const x = 6 * d + c * colW, y = top + (i % rows) * rh;
+      ctx.font = `${10 * d}px monospace`; ctx.fillStyle = s === 'ok' ? '#6dff9a' : s === 'falta' ? '#ff6b6b' : '#aaa'; ctx.fillText((s === 'ok' ? '✔ ' : s === 'falta' ? '✘ ' : '… ') + k, x, y, colW - 20 * d);
+      if (s === 'ok') { const im = this.img[k]; ctx.imageSmoothingEnabled = false; ctx.drawImage(im, 0, 0, Math.min(im.width, im.height), im.height, x + colW - 18 * d, y - 10 * d, 12 * d, 12 * d); } });
+    ctx.fillStyle = '#fff'; ctx.font = `${10 * d}px monospace`; ctx.fillText(`${ok}/${this.files.length} achadas · ✘ = não achei (confira pasta, nome e MAIÚSCULAS/minúsculas)`, 8 * d, cv.height - 8 * d, cv.width - 16 * d); ctx.restore(); }
 };
 SPR.load();
 /* ===== entities/Hazard.js + systems/ObstacleSystem.js (lote 1: espinhos fixos, retráteis, pisos temporários) ===== */
@@ -461,7 +492,7 @@ function* genSteps(seed, phaseIdx) {
       }
       if (!chosen) { chosen = instantiate(TEMPLATES.find(t => t.id === FALLBACK_ID), sy, false, 0); log.push({ floor: i + 1, tpl: FALLBACK_ID, why: 'FALLBACK FALHOU (torre inválida)' }); }
     }
-    chosen.solids.forEach(s => { if (s.kind === 'plat') s.sk = st.id; }); solids.push(...chosen.solids); const ph2 = { ...ph, idx: phaseIdx, obst: { ...ph.obst, ...st.obst } }; decorate(chosen, orng, ph2, solids, blk, haz, prev, i, N, opt); themed(chosen, orng, st, haz, phaseIdx); floors.push(chosen); lastId = chosen.id; prev = chosen.route[chosen.route.length - 1]; yield i + 1;
+    chosen.solids.forEach(s => { s.sk = st.id; }); solids.push(...chosen.solids); const ph2 = { ...ph, idx: phaseIdx, obst: { ...ph.obst, ...st.obst } }; decorate(chosen, orng, ph2, solids, blk, haz, prev, i, N, opt); themed(chosen, orng, st, haz, phaseIdx); floors.push(chosen); lastId = chosen.id; prev = chosen.route[chosen.route.length - 1]; yield i + 1;
   }
   const goal = prev; goal.kind = 'goal';
   const tower = { seed, phase: phaseIdx, N, BASE, FH, H: BASE + 100, solids, goal, floors, hazards: haz, structs, xMin: -300, stats, log, spawn: { x: -220, y: BASE - CFG.player.h },
@@ -525,15 +556,20 @@ function drawHazards() {
       if (st === 'on') { ctx.fillStyle = 'rgba(255,240,90,.28)'; ctx.beginPath(); ctx.arc(h.cx, h.cy, h.R, 0, 6.29); ctx.fill(); ctx.strokeStyle = '#fff36a'; ctx.lineWidth = 3; ctx.beginPath(); for (let i = 0; i < 6; i++) { const a = i * 1.05 + t * 9; ctx.moveTo(h.cx, h.cy); ctx.lineTo(h.cx + Math.cos(a) * h.R, h.cy + Math.sin(a + .6) * h.R); } ctx.stroke(); } continue; }
     if (h.type === 'monkey') { if (!SPR.at(ctx, 'enemies/monkey', h.mx + 12, h.my + 26, h.bvx < 0, 'b')) { ctx.fillStyle = '#8b5a2b'; ctx.fillRect(h.mx, h.my, 24, 26); ctx.fillStyle = '#e8c9a0'; ctx.fillRect(h.mx + 6, h.my + 6, 12, 10); ctx.fillStyle = '#111'; ctx.fillRect(h.mx + 8, h.my + 8, 3, 3); ctx.fillRect(h.mx + 14, h.my + 8, 3, 3); }
       const u = (t + h.ph) % h.T; if (u < h.fl) { const b = Obstacles.banana(h, u); if (!SPR.at(ctx, 'enemies/banana', b.x, b.y, false, 'c', u * 8)) { ctx.fillStyle = '#ffe14d'; ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(u * 8); ctx.fillRect(-7, -3, 14, 6); ctx.restore(); } } continue; }
-    if (h.type === 'saw') { const z = Obstacles.zpos(h, t), cx = z.x + 14, cy = h.y + 14; if (SPR.at(ctx, 'obstacles/saw', cx, cy)) continue; ctx.fillStyle = '#c9d1d9'; ctx.beginPath(); for (let i = 0; i < 16; i++) { const a = i * .3927 + t * 12 * z.dir, r = i % 2 ? 11 : 15; ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); } ctx.closePath(); ctx.fill(); ctx.fillStyle = '#444'; ctx.beginPath(); ctx.arc(cx, cy, 4, 0, 6.29); ctx.fill(); continue; }
+    if (h.type === 'saw') { const z = Obstacles.zpos(h, t), cx = z.x + 14, cy = h.y + 14; { const si = SPR.get('obstacles/saw'); if (SPR.at(ctx, 'obstacles/saw', cx, cy, false, 'c', si && SPR.frames(si) === 1 ? t * 12 * z.dir : 0)) continue; } ctx.fillStyle = '#c9d1d9'; ctx.beginPath(); for (let i = 0; i < 16; i++) { const a = i * .3927 + t * 12 * z.dir, r = i % 2 ? 11 : 15; ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); } ctx.closePath(); ctx.fill(); ctx.fillStyle = '#444'; ctx.beginPath(); ctx.arc(cx, cy, 4, 0, 6.29); ctx.fill(); continue; }
     if (h.type === 'piston') { const e = st === 'on' ? 1 : st === 'ret' ? .35 : st === 'warn' ? .12 : 0, sh = st === 'warn' ? Math.sin(t * 80) * 1.5 : 0, len = 16 + e * (h.h - 16);
-      ctx.fillStyle = '#4a4f57'; ctx.fillRect(h.x + 14, h.y - 40, 12, 24 + len); ctx.fillStyle = st === 'warn' ? '#ffb347' : '#8a929c'; ctx.fillRect(h.x + sh, h.y + len - 16, h.w, 16); ctx.fillStyle = '#ff4d5e'; ctx.fillRect(h.x + sh, h.y + len - 4, h.w, 4); continue; }
+      if (!SPR.pic(ctx, 'obstacles/piston_body', h.x + 14, h.y - 40, 12, 24 + len)) { ctx.fillStyle = '#4a4f57'; ctx.fillRect(h.x + 14, h.y - 40, 12, 24 + len); }
+      if (!SPR.pic(ctx, 'obstacles/piston_head', h.x + sh, h.y + len - 16, h.w, 16)) { ctx.fillStyle = st === 'warn' ? '#ffb347' : '#8a929c'; ctx.fillRect(h.x + sh, h.y + len - 16, h.w, 16); ctx.fillStyle = '#ff4d5e'; ctx.fillRect(h.x + sh, h.y + len - 4, h.w, 4); } continue; }
     if (h.type === 'zombie') { const z = Obstacles.zpos(h, t); if (SPR.at(ctx, 'enemies/zombie', z.x + 12, h.y + h.h, z.dir < 0, 'b')) continue; ctx.fillStyle = '#7bc36d'; ctx.fillRect(z.x, h.y, 24, h.h); ctx.fillStyle = '#1b1b1b'; ctx.fillRect(z.x + (z.dir > 0 ? 14 : 4), h.y + 7, 6, 6); ctx.fillStyle = '#ff4d5e'; ctx.fillRect(z.x + (z.dir > 0 ? 20 : 0), h.y + 18, 4, 5); continue; }
     if (h.type === 'spin') { const a = h.a0 + h.sp * t; ctx.strokeStyle = 'rgba(255,77,94,.2)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(h.cx, h.cy, h.R, 0, 6.29); ctx.stroke();
-      ctx.strokeStyle = '#ff4d5e'; ctx.lineWidth = 8; ctx.beginPath(); ctx.moveTo(h.cx, h.cy); ctx.lineTo(h.cx + Math.cos(a) * h.R, h.cy + Math.sin(a) * h.R); ctx.stroke(); ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(h.cx, h.cy, 8, 0, 6.29); ctx.fill(); continue; }
+      if (!SPR.bar(ctx, 'obstacles/spin_bar', h.cx, h.cy, h.R, 14, a)) { ctx.strokeStyle = '#ff4d5e'; ctx.lineWidth = 8; ctx.beginPath(); ctx.moveTo(h.cx, h.cy); ctx.lineTo(h.cx + Math.cos(a) * h.R, h.cy + Math.sin(a) * h.R); ctx.stroke(); }
+      if (!SPR.at(ctx, 'obstacles/spin_hub', h.cx, h.cy)) { ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(h.cx, h.cy, 8, 0, 6.29); ctx.fill(); } continue; }
     if (h.type === 'rspike') { ctx.fillStyle = '#4a2a35'; ctx.fillRect(h.x, h.y + h.h - 4, h.w, 4); }
+    const sk = SPR.has('obstacles/' + h.type) ? 'obstacles/' + h.type : SPR.has('obstacles/spike') ? 'obstacles/spike' : null; let spr = false; // arte própria; retrátil sem arte própria reaproveita a do espinho fixo
+    if (sk) { const rs = h.type === 'rspike', own = sk === 'obstacles/rspike', kk = rs && !own ? (st === 'safe' ? 0 : st === 'warn' ? .3 : st === 'ret' ? .4 : 1) : 1, n = Math.max(1, Math.round(h.w / 18)), uw = h.w / n; spr = true;
+      if (kk > 0) for (let i = 0; i < n; i++) SPR.at(ctx, sk, h.x + (i + .5) * uw, h.y + h.h, false, 'b', 0, own ? { safe: 0, warn: 1, on: 2, ret: 3 }[st] : null, [uw + 1, 16 * kk]); }
     const k = h.type === 'spike' || st === 'on' ? 1 : st === 'safe' ? 0 : st === 'warn' ? (Math.floor(t * 12) % 2 ? .5 : .2) : .3; // aviso pisca antes de ativar
-    if (k) { ctx.fillStyle = st === 'warn' ? '#ffb347' : '#ff4d5e';
+    if (!spr && k) { ctx.fillStyle = st === 'warn' ? '#ffb347' : '#ff4d5e';
       const n = Math.round(h.w / 12), tw = h.w / n, by = h.y + h.h; ctx.beginPath();
       for (let i = 0; i < n; i++) { ctx.moveTo(h.x + i * tw, by); ctx.lineTo(h.x + (i + .5) * tw, by - h.h * k); ctx.lineTo(h.x + (i + 1) * tw, by); }
       ctx.fill(); }
@@ -560,14 +596,15 @@ function uiLayout() {
 }
 function drawMenu() {
   const d = devicePixelRatio || 1, w = cv.width, top = Math.max(60, innerHeight * .12), L = uiLayout();
-  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = 'rgba(8,6,20,.94)'; ctx.fillRect(0, 0, w, cv.height); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#f2c94c'; ctx.font = `bold ${Math.min(36, innerWidth * .085) * d}px system-ui,sans-serif`; ctx.fillText('TORRE DA RESENHA', w / 2, top * d);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); const mbg = SPR.parallax(ctx, 'backgrounds/menu', 0, w, cv.height); ctx.fillStyle = mbg ? 'rgba(8,6,20,.45)' : 'rgba(8,6,20,.94)'; ctx.fillRect(0, 0, w, cv.height); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const lg = SPR.get('ui/title'); if (lg) { const lw = Math.min(innerWidth - 40, 420) * d, lh = lw * lg.height / lg.width; ctx.imageSmoothingEnabled = false; ctx.drawImage(lg, (w - lw) / 2, top * d - lh / 2, lw, lh); }
+  else { ctx.fillStyle = '#f2c94c'; ctx.font = `bold ${Math.min(36, innerWidth * .085) * d}px system-ui,sans-serif`; ctx.fillText('TORRE DA RESENHA', w / 2, top * d); }
   ctx.fillStyle = 'rgba(255,255,255,.8)'; ctx.font = `${14 * d}px system-ui,sans-serif`;
   if (UI.screen === 'lobby') { ctx.fillText(`Sala local (offline) · código ${UI.code}`, w / 2, (top + 38) * d); ctx.fillText('Jogadores 1/5 · você (anfitrião) · pronto', w / 2, (top + 62) * d); }
   for (const b of L) { const X = b.x * d, Y = b.y * d, W = b.w * d, H = b.h * d;
     if (b.swatch) { ctx.fillStyle = b.swatch; ctx.beginPath(); ctx.roundRect(X, Y, W, H, 12 * d); ctx.fill(); if (App.color === b.swatch) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 3 * d; ctx.stroke(); } continue; }
     if (b.text) { ctx.fillStyle = '#fff'; ctx.font = `bold ${15 * d}px system-ui,sans-serif`; b.text.split('\n').forEach((t, i) => ctx.fillText(t, X + W / 2, Y + H * (.36 + i * .3))); continue; }
-    ctx.fillStyle = b.go ? '#2a9d5c' : '#2b2f66'; ctx.beginPath(); ctx.roundRect(X, Y, W, H, 14 * d); ctx.fill();
+    if (!SPR.pic(ctx, b.go ? 'ui/button_go' : 'ui/button', X, Y, W, H)) { ctx.fillStyle = b.go ? '#2a9d5c' : '#2b2f66'; ctx.beginPath(); ctx.roundRect(X, Y, W, H, 14 * d); ctx.fill(); }
     ctx.fillStyle = '#fff'; ctx.font = `bold ${19 * d}px system-ui,sans-serif`; ctx.fillText(b.label, X + W / 2, Y + H / 2); }
   if (UI.msg) { ctx.fillStyle = '#ffb347'; ctx.font = `${13 * d}px system-ui,sans-serif`; ctx.fillText(UI.msg, w / 2, (innerHeight - 40) * d, w - 24 * d); }
   ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
@@ -575,29 +612,33 @@ function drawMenu() {
 addEventListener('pointerdown', e => { if (!Game.menu) return; const b = uiLayout().find(b => b.fn && e.clientX >= b.x && e.clientX <= b.x + b.w && e.clientY >= b.y && e.clientY <= b.y + b.h); if (b) b.fn(); });
 function render(p) {
   const g = ctx.createLinearGradient(0,0,0,cv.height); g.addColorStop(0,'#1b1440'); g.addColorStop(1,'#0e0b1a');
-  ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle = g; ctx.fillRect(0,0,cv.width,cv.height);
+  ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle = g; ctx.fillRect(0,0,cv.width,cv.height); SPR.parallax(ctx, 'backgrounds/main', Cam.y / Math.max(1, Level.H - Cam.vh), cv.width, cv.height);
   ctx.setTransform(Cam.scale,0,0,Cam.scale,-Cam.x*Cam.scale,-Cam.y*Cam.scale);
-  if (App.tower) { Level.structs.forEach((s, i) => { const y1 = Level.BASE - 2 * i * Level.FH; ctx.fillStyle = STY[s.id].bg; ctx.fillRect(40, y1 - 2 * Level.FH, Level.W - 80, 2 * Level.FH); });
+  if (App.tower) { Level.structs.forEach((s, i) => { const y1 = Level.BASE - 2 * i * Level.FH; if (y1 < Cam.y || y1 - 2 * Level.FH > Cam.y + Cam.vh) return; if (!SPR.pic(ctx, 'backgrounds/' + s.id, 40, y1 - 2 * Level.FH, Level.W - 80, 2 * Level.FH, true)) { ctx.fillStyle = STY[s.id].bg; ctx.fillRect(40, y1 - 2 * Level.FH, Level.W - 80, 2 * Level.FH); } });
     ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.font = 'bold 22px system-ui,sans-serif'; ctx.fillText('ENTRADA ➜', -250, Level.BASE - 50); }
   for (const s of Level.solids) {
     if (s.y > Cam.y + Cam.vh || s.y + s.h < Cam.y) continue;
     if (s.off) continue; const T = s.temp, sh = T && T.state === 'warn' ? Math.sin(Game.t * 90) * 1.5 : 0;
-    ctx.fillStyle = T && T.state === 'warn' ? '#ffb347' : T && T.mode === 'crumble' ? '#b07a4f' : (s.kind === 'plat' && s.sk && STY[s.sk] ? STY[s.sk].plat : COL[s.kind]); ctx.globalAlpha = T && T.state === 'back' ? .5 : 1; if (T || !SPR.tile(ctx, s, sh)) ctx.fillRect(s.x + sh, s.y, s.w, s.h); ctx.globalAlpha = 1;
-    if (s.kind === 'plat' || s.kind === 'goal') { ctx.fillStyle = 'rgba(255,255,255,.25)'; ctx.fillRect(s.x, s.y, s.w, 4); }
+    ctx.fillStyle = T && T.state === 'warn' ? '#ffb347' : T && T.mode === 'crumble' ? '#b07a4f' : (s.kind === 'plat' && s.sk && STY[s.sk] ? STY[s.sk].plat : COL[s.kind]); ctx.globalAlpha = T && T.state === 'back' ? .5 : 1; const tk = T ? (T.mode === 'crumble' ? (T.state === 'warn' ? ['tiles/crumble_warn', 'tiles/crumble'] : ['tiles/crumble']) : (T.state === 'warn' ? ['tiles/temp_warn', 'tiles/temp'] : ['tiles/temp'])) : null, art = SPR.tile(ctx, s, sh, tk); if (!art) ctx.fillRect(s.x + sh, s.y, s.w, s.h); ctx.globalAlpha = 1;
+    if (!art && (s.kind === 'plat' || s.kind === 'goal')) { ctx.fillStyle = 'rgba(255,255,255,.25)'; ctx.fillRect(s.x, s.y, s.w, 4); }
   }
   ctx.font = '14px system-ui,sans-serif'; ctx.fillStyle = 'rgba(255,255,255,.18)';
   for (let f = 0; f < Level.N; f++) { const y = Level.BASE - f * Level.FH; ctx.fillRect(40, y, Level.W - 80, 1); ctx.fillText('ANDAR ' + (f + 1), 50, y - 6); }
-  drawHazards(); const gl = Level.goal; ctx.fillStyle = '#fff'; ctx.fillRect(gl.x + gl.w/2, gl.y - 46, 3, 46);
-  ctx.fillStyle = '#e63946'; ctx.fillRect(gl.x + gl.w/2 + 3, gl.y - 46, 24, 14);
+  drawHazards(); const gl = Level.goal; if (!SPR.at(ctx, 'obstacles/flag', gl.x + gl.w/2, gl.y, false, 'b')) { ctx.fillStyle = '#fff'; ctx.fillRect(gl.x + gl.w/2, gl.y - 46, 3, 46);
+  ctx.fillStyle = '#e63946'; ctx.fillRect(gl.x + gl.w/2 + 3, gl.y - 46, 24, 14); }
   ctx.globalAlpha = p.state === 'dead' ? .4 : p.invul > 0 && Math.floor(p.invul * 12) % 2 ? .4 : 1; const sp = SPR.player(ctx, p); if (!sp) { ctx.fillStyle = App.color; ctx.fillRect(p.x, p.y, p.w, p.h); if (p.hurtT > 0) { ctx.fillStyle = '#fff'; ctx.fillRect(p.x, p.y, p.w, p.h); } if (p.sliding) { ctx.fillStyle = 'rgba(255,255,255,.4)'; ctx.fillRect(p.x, p.y, p.w, p.h); }
   ctx.fillStyle = '#fff'; ctx.fillRect(p.x + (p.face > 0 ? 12 : 3), p.y + 7, 7, 7);
   ctx.fillStyle = '#111'; ctx.fillRect(p.x + (p.face > 0 ? 16 : 3), p.y + 9, 3, 4); }
   ctx.globalAlpha = 1;
-  if (p.invul > 0) { ctx.strokeStyle = `rgba(90,220,255,${.5 + .3 * Math.sin(Game.t * 14 + p.invul * 14)})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(p.x + p.w / 2, p.y + p.h / 2, 24, 0, 6.29); ctx.stroke(); } // escudo = invulnerável
-  if ((p.pushT || 0) > 0) { const k = 1 - p.pushT / CFG.push.anim; ctx.save(); ctx.translate(p.x + p.w / 2, p.y + p.h / 2); ctx.scale(p.pushFace || 1, 1); ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(0, 0, 18 + CFG.push.range * k, -.9, .9); ctx.stroke(); ctx.restore(); }
+  if (p.hurtT > 0) SPR.at(ctx, 'effects/hit', p.x + p.w / 2, p.y + p.h / 2, false, 'c', 0, SPR.fr('effects/hit', 1 - p.hurtT / .35));
+  if (p.invul > 0 && !SPR.at(ctx, 'effects/shield', p.x + p.w / 2, p.y + p.h / 2)) { ctx.strokeStyle = `rgba(90,220,255,${.5 + .3 * Math.sin(Game.t * 14 + p.invul * 14)})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(p.x + p.w / 2, p.y + p.h / 2, 24, 0, 6.29); ctx.stroke(); } // escudo = invulnerável
+  if ((p.pushT || 0) > 0 && !SPR.at(ctx, 'effects/push', p.x + p.w / 2 + (p.pushFace || 1) * (14 + CFG.push.range * .5), p.y + p.h / 2, (p.pushFace || 1) < 0, 'c', 0, SPR.fr('effects/push', 1 - p.pushT / CFG.push.anim))) { const k = 1 - p.pushT / CFG.push.anim; ctx.save(); ctx.translate(p.x + p.w / 2, p.y + p.h / 2); ctx.scale(p.pushFace || 1, 1); ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(0, 0, 18 + CFG.push.range * k, -.9, .9); ctx.stroke(); ctx.restore(); }
   if (Lava.y < Cam.y + Cam.vh) { const x0 = Cam.x - 20, x1 = Cam.x + Cam.vw + 20, y1 = Cam.y + Cam.vh + 20, ph = (Game.started ? Game.t : performance.now() / 1000) * 2.2; // lava: onda simples
     const lg = ctx.createLinearGradient(0, Lava.y, 0, Lava.y + 260); lg.addColorStop(0, '#ffb02e'); lg.addColorStop(.25, '#ff5a1f'); lg.addColorStop(1, '#8a1405');
-    ctx.fillStyle = lg; ctx.beginPath(); ctx.moveTo(x0, y1); for (let x = x0; x <= x1; x += 24) ctx.lineTo(x, Lava.y + Math.sin(x * .045 + ph) * 5 + Math.sin(x * .11 - ph * 1.7) * 2.5); ctx.lineTo(x1, y1); ctx.closePath(); ctx.fill(); }
+    ctx.fillStyle = lg; ctx.beginPath(); ctx.moveTo(x0, y1); for (let x = x0; x <= x1; x += 24) ctx.lineTo(x, Lava.y + Math.sin(x * .045 + ph) * 5 + Math.sin(x * .11 - ph * 1.7) * 2.5); ctx.lineTo(x1, y1); ctx.closePath(); ctx.fill();
+    const lt = SPR.get('effects/lava'), fh = lt ? lt.height : 0; // arte: corpo repetido + faixa de superfície (borda de cima = linha da lava)
+    SPR.fillPat(ctx, 'effects/lava_body', x0, Lava.y + fh, x1 - x0, y1 - Lava.y - fh);
+    if (lt) for (let x = Math.floor(x0 / fh) * fh; x < x1; x += fh) SPR.at(ctx, 'effects/lava', x + fh / 2, Lava.y + fh / 2); }
   if (debug) { ctx.strokeStyle = '#0f0'; ctx.lineWidth = 1; ctx.strokeRect(p.x, p.y, p.w, p.h); }
   if (debug) {
     const T = App.tower;
@@ -619,7 +660,10 @@ function render(p) {
   ctx.font = `${12*d}px system-ui,sans-serif`; ctx.fillStyle = 'rgba(255,255,255,.7)';
   ctx.fillText(App.tower ? `Fase ${App.phase+1} · ${CFG.phases[App.phase].name} · seed ${App.seed}` : 'Torre manual (teste)', (14+SA.l)*d, (46+SA.t)*d);
   { const dist = Lava.y - (p.y + p.h), near = p.state === 'active' && dist < CFG.lavaWarn, k = near ? 1 - Math.max(0, dist) / CFG.lavaWarn : 0; // HUD: corações, aviso de lava
-    ctx.font = `${22*d}px system-ui,sans-serif`; for (let i = 0; i < CFG.hearts; i++) { ctx.fillStyle = i < p.hearts ? '#ff3b4e' : 'rgba(255,255,255,.22)'; ctx.fillText('♥', (14 + SA.l + i * 28)*d, (76 + SA.t)*d); }
+    ctx.font = `${22*d}px system-ui,sans-serif`; for (let i = 0; i < CFG.hearts; i++) { const full = i < p.hearts, hx = (14 + SA.l + i * 28)*d, hy = (54 + SA.t)*d;
+      if (SPR.pic(ctx, full ? 'ui/heart_full' : 'ui/heart_empty', hx, hy, 24*d, 24*d)) continue;
+      if (!full && SPR.has('ui/heart_full')) { ctx.globalAlpha = .25; SPR.pic(ctx, 'ui/heart_full', hx, hy, 24*d, 24*d); ctx.globalAlpha = 1; continue; }
+      ctx.fillStyle = full ? '#ff3b4e' : 'rgba(255,255,255,.22)'; ctx.fillText('♥', hx, (76 + SA.t)*d); }
     if (p.invul > 0) { ctx.fillStyle = '#5adcff'; ctx.fillRect((14 + SA.l)*d, (84 + SA.t)*d, (CFG.hearts * 28 - 6)*d*p.invul/CFG.invul, 4*d); }
     if (near) { const gl = ctx.createLinearGradient(0, cv.height, 0, cv.height * .72); gl.addColorStop(0, `rgba(255,70,20,${.55*k})`); gl.addColorStop(1, 'rgba(255,70,20,0)'); ctx.fillStyle = gl; ctx.fillRect(0, cv.height * .72, cv.width, cv.height * .28);
       if (k > .45 && Math.floor(Game.t * 6) % 2 === 0 || k <= .45) { ctx.fillStyle = '#ffb02e'; ctx.font = `bold ${14*d}px system-ui,sans-serif`; void 0; } }
@@ -629,11 +673,14 @@ function render(p) {
   if (Input.isTouch() && !Game.menu) {
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     for (const b of Input.layout()) {
-      const pc = b.a === 'push', cd = pc ? (player.pushCd || 0) : 0; ctx.globalAlpha = Input.down(b.a) ? .55 : .22; ctx.fillStyle = pc && (player.pushDeny || 0) > 0 ? '#ff4d5e' : pc && !cd ? '#ffd23f' : '#fff';
-      ctx.beginPath(); ctx.roundRect(b.x*d, b.y*d, b.w*d, b.h*d, 18*d); ctx.fill();
+      const pc = b.a === 'push', cd = pc ? (player.pushCd || 0) : 0, dn = Input.down(b.a), bk = 'ui/btn_' + b.a, art = SPR.has(bk), alt = dn && SPR.has(bk + '_down');
+      if (art) { const sc = dn && !alt ? .94 : 1, ox = b.w * (1 - sc) / 2, oy = b.h * (1 - sc) / 2; ctx.globalAlpha = dn && !alt ? .75 : .95; SPR.pic(ctx, alt ? bk + '_down' : bk, (b.x + ox)*d, (b.y + oy)*d, b.w*sc*d, b.h*sc*d);
+        if (pc && (player.pushDeny || 0) > 0) { ctx.globalAlpha = .4; ctx.fillStyle = '#ff4d5e'; ctx.beginPath(); ctx.roundRect(b.x*d, b.y*d, b.w*d, b.h*d, 18*d); ctx.fill(); } }
+      else { ctx.globalAlpha = dn ? .55 : .22; ctx.fillStyle = pc && (player.pushDeny || 0) > 0 ? '#ff4d5e' : pc && !cd ? '#ffd23f' : '#fff';
+        ctx.beginPath(); ctx.roundRect(b.x*d, b.y*d, b.w*d, b.h*d, 18*d); ctx.fill(); }
       if (cd > 0) { ctx.globalAlpha = .6; ctx.fillStyle = '#000'; ctx.beginPath(); ctx.roundRect(b.x*d, b.y*d, b.w*d, b.h*d * (cd / CFG.push.cooldown), 18*d); ctx.fill(); }
       ctx.globalAlpha = .95; ctx.fillStyle = '#fff'; ctx.font = `bold ${Math.min(b.w, b.h)*(b.t.length > 5 && !cd ? 0.2 : 0.28)*d}px system-ui,sans-serif`;
-      ctx.fillText(cd > 0 ? Math.ceil(cd) + 's' : b.t, (b.x + b.w/2)*d, (b.y + b.h/2)*d);
+      if (!art || cd > 0) ctx.fillText(cd > 0 ? Math.ceil(cd) + 's' : b.t, (b.x + b.w/2)*d, (b.y + b.h/2)*d);
     }
     ctx.globalAlpha = 1; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
   }
