@@ -1,10 +1,18 @@
-# assets/images/backgrounds
+# Fundos
+Pasta: `assets/images/backgrounds/` — tudo em **minúsculo**, formato **.png**.
+Fundos inteiros (imagem única).
 
-Fundos (parallax). Imagens maiores são permitidas aqui.
+## Já ligado no código (é só salvar o arquivo com este nome)
+| Arquivo | Tipo | Tamanho sugerido | Quando aparece |
+|---|---|---|---|
+| `main.png` | inteira | ex.: 540×1400 | fundo do jogo, desliza devagar conforme você sobe |
+| `menu.png` | inteira | ex.: 540×960 | fundo do menu |
+| `<estrutura>.png` | inteira | 820×560 | fundo de cada estrutura (2 andares): `cemiterio`, `floresta`, `corredor`, `oceano`, `fabrica` |
 
-Regras: PNG com fundo transparente · cada quadro **32x32 px** · vários quadros ficam LADO A LADO na mesma imagem (o jogo conta sozinho: largura ÷ 32) · nome em minúsculas, sem acento e sem espaço.
+## Ainda NÃO ligado (nome reservado; só funciona depois que a mecânica existir no jogo)
+- Estruturas novas: `<id>.png` com o id do editor.
 
-| Arquivo (.png) | Situação | O que é |
-|---|---|---|
-| `<id>_far / <id>_mid / <id>_near` | 🕓 reservado (ainda sem código) | camadas do fundo de cada estrutura (longe, meio, perto) |
-| `menu` | 🕓 reservado (ainda sem código) | fundo do menu principal |
+## Regras
+- **Animada** = tira horizontal de quadros quadrados (96×32 = 3 quadros). **Inteira** = imagem única, esticada.
+- Desenhe olhando para a **direita**.
+- Arquivo ausente = o jogo usa a forma vetorial antiga. Para conferir: `index.html?assets`.
